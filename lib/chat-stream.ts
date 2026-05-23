@@ -5,11 +5,13 @@ export type ChatStreamDone = {
   runId: string;
   status: string;
   result?: string;
+  thinking?: string;
 };
 
 export type ChatStreamHandlers = {
   onAgent?: (agentId: string) => void;
   onText?: (delta: string) => void;
+  onThinking?: (payload: { delta?: string; text?: string }) => void;
   onActivity?: (activity: string) => void;
   onSource?: (path: string) => void;
   onDone?: (payload: ChatStreamDone) => void;
@@ -52,6 +54,20 @@ export async function consumeChatStream(
           }
           break;
         }
+        case "thinking": {
+          const delta = data.delta;
+          const text = data.text;
+
+          if (typeof delta === "string" && delta.length > 0) {
+            handlers.onThinking?.({ delta });
+            break;
+          }
+
+          if (typeof text === "string" && text.length > 0) {
+            handlers.onThinking?.({ text });
+          }
+          break;
+        }
         case "tool": {
           const name = data.name;
           const status = data.status;
@@ -88,7 +104,8 @@ export async function consumeChatStream(
               agentId,
               runId,
               status,
-              result: typeof data.result === "string" ? data.result : undefined
+              result: typeof data.result === "string" ? data.result : undefined,
+              thinking: typeof data.thinking === "string" ? data.thinking : undefined
             });
           }
           break;

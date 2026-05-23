@@ -13,7 +13,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Onboarding from "@/components/Onboarding";
 import RepoPicker from "@/components/RepoPicker";
+import SidebarRecents from "@/components/SidebarRecents";
 import { consumeChatStream } from "@/lib/chat-stream";
+import { createStreamBuffer } from "@/lib/stream-buffer";
+import { mergeThinkingText } from "@/lib/thinking";
 import { MAX_CHAT_IMAGES } from "@/lib/chat-images";
 import { APP_NAME, DEFAULT_BRANCH, SUGGESTED_PROMPTS } from "@/lib/defaults";
 import { RepoOption, fetchRepositories, repoLabel } from "@/lib/repo";
@@ -21,11 +24,16 @@ import { githubBlobUrl, uniqueSortedSources } from "@/lib/sources";
 import {
   STORAGE_KEYS,
   clearStoredApiKey,
+  clearStoredGitHubToken,
   getDefaultBranch,
   getDefaultRepo,
+  getRememberKey,
   getStoredApiKey,
+  getStoredGitHubToken,
+  isPlausibleGitHubToken,
   maskApiKey,
   persistApiKey,
+  persistGitHubToken,
   setDefaultBranch,
   setDefaultRepo
 } from "@/lib/storage";
@@ -43,6 +51,7 @@ type Message = {
   error?: boolean;
   streaming?: boolean;
   activity?: string;
+  thinking?: string;
   sources?: string[];
 };
 
@@ -324,6 +333,7 @@ function stripPrivateConversationFields(conversation: Conversation) {
 
 export default function ChatApp() {
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [githubToken, setGithubToken] = useState<string | null>(null);
   const [hasAuthHydrated, setHasAuthHydrated] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState(uid);
@@ -370,6 +380,7 @@ export default function ChatApp() {
 
   useEffect(() => {
     setApiKey(getStoredApiKey());
+    setGithubToken(getStoredGitHubToken());
     setHasAuthHydrated(true);
   }, []);
 
@@ -586,15 +597,20 @@ export default function ChatApp() {
     );
   }
 
-  function startNewChat(options?: { forcePicker?: boolean }) {
-    const defaultRepo = getDefaultRepo();
-    const defaultBranch = getDefaultBranch() || DEFAULT_BRANCH;
+  function startNewChatSameRepo() {
+    const repoUrl = activeConversation?.repoUrl || getDefaultRepo();
+    const branch =
+      activeConversation?.branch || getDefaultBranch() || DEFAULT_BRANCH;
 
-    if (!options?.forcePicker && defaultRepo) {
-      activateConversation(createConversation(defaultRepo, defaultBranch));
+    if (!repoUrl) {
+      openRepoPicker("new-chat");
       return;
     }
 
+    activateConversation(createConversation(repoUrl, branch));
+  }
+
+  function startNewChatInAnotherRepo() {
     openRepoPicker("new-chat");
   }
 
@@ -612,7 +628,7 @@ export default function ChatApp() {
       return;
     }
 
-    startNewChat();
+    startNewChatSameRepo();
   }
 
   function renameConversation(id: string) {
@@ -709,6 +725,7 @@ export default function ChatApp() {
 
     const assistantId = uid();
     let assistantContent = "";
+    let assistantThinking = "";
     let assistantActivity = "Starting Cursor cloud agent…";
     let assistantSources: string[] = [];
     let resolvedAgentId = activeConversation.agentId;
@@ -722,6 +739,22 @@ export default function ChatApp() {
     };
 
     setMessages([...optimisticMessages, streamingAssistant]);
+
+    const streamBuffer = createStreamBuffer(50, (snapshot) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: snapshot.content,
+                thinking: snapshot.thinking || undefined,
+                activity: snapshot.activity || undefined
+              }
+            : message
+        )
+      );
+    });
+    streamBuffer.setActivity(assistantActivity);
 
     try {
       const response = await fetch("/api/chat", {
@@ -757,25 +790,15 @@ export default function ChatApp() {
         },
         onText: (delta) => {
           assistantContent += delta;
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    content: assistantContent,
-                    activity: assistantActivity
-                  }
-                : message
-            )
-          );
+          streamBuffer.appendText(delta);
+        },
+        onThinking: (payload) => {
+          assistantThinking = mergeThinkingText(assistantThinking, payload);
+          streamBuffer.setThinking(assistantThinking);
         },
         onActivity: (activity) => {
           assistantActivity = activity;
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId ? { ...message, activity } : message
-            )
-          );
+          streamBuffer.setActivity(activity);
         },
         onSource: (path) => {
           assistantSources = uniqueSortedSources([...assistantSources, path]);
@@ -791,9 +814,18 @@ export default function ChatApp() {
           resolvedAgentId = payload.agentId;
           if (payload.result?.trim()) {
             assistantContent = payload.result.trim();
+            streamBuffer.setContent(assistantContent);
+          }
+          if (payload.thinking?.trim()) {
+            assistantThinking = mergeThinkingText(assistantThinking, {
+              text: payload.thinking.trim()
+            });
+            streamBuffer.setThinking(assistantThinking);
           }
         }
       });
+
+      streamBuffer.flushNow();
 
       if (!assistantContent.trim()) {
         throw new Error("Cursor returned no assistant content.");
@@ -805,6 +837,7 @@ export default function ChatApp() {
         content: assistantContent,
         createdAt: streamingAssistant.createdAt,
         streaming: false,
+        thinking: assistantThinking || undefined,
         sources: assistantSources
       };
       const finalMessages = [...optimisticMessages, assistantMessage];
@@ -1116,7 +1149,7 @@ export default function ChatApp() {
   }
 
   function resetChat() {
-    startNewChat();
+    startNewChatSameRepo();
   }
 
   function openMobileConversation(conversation: Conversation) {
@@ -1124,25 +1157,58 @@ export default function ChatApp() {
     setMobileSidebarOpen(false);
   }
 
-  function startMobileNewChat() {
-    startNewChat();
+  function startMobileNewChatSameRepo() {
+    startNewChatSameRepo();
     setMobileSidebarOpen(false);
   }
 
-  function handleOnboardingComplete(key: string, remember: boolean) {
+  function startMobileNewChatInAnotherRepo() {
+    startNewChatInAnotherRepo();
+    setMobileSidebarOpen(false);
+  }
+
+  function handleOnboardingComplete({
+    apiKey: key,
+    githubToken: token,
+    remember
+  }: {
+    apiKey: string;
+    githubToken?: string;
+    remember: boolean;
+  }) {
     persistApiKey(key, remember);
+    persistGitHubToken(token ?? null, remember);
     setApiKey(key);
+    setGithubToken(token ?? null);
   }
 
   function handleSignOut() {
     clearStoredApiKey();
     setApiKey(null);
+    setGithubToken(null);
     setRepos([]);
     setReposError(null);
     setRepoPickerOpen(false);
     setRepoPickerMode("initial");
     seededDefaultConversationRef.current = false;
     setMobileSidebarOpen(false);
+  }
+
+  function handleClearGitHubToken() {
+    clearStoredGitHubToken();
+    setGithubToken(null);
+  }
+
+  function handleSaveGitHubToken(token: string) {
+    const trimmed = token.trim();
+
+    if (!isPlausibleGitHubToken(trimmed)) {
+      return false;
+    }
+
+    persistGitHubToken(trimmed, getRememberKey());
+    setGithubToken(trimmed);
+    return true;
   }
 
   const needsInitialRepoPicker = Boolean(
@@ -1168,6 +1234,7 @@ export default function ChatApp() {
         repos={repos}
         loading={reposLoading}
         error={reposError}
+        githubToken={githubToken}
         initialBranch={getDefaultBranch() || DEFAULT_BRANCH}
         onRetry={() => void loadRepositories(apiKey)}
         onSelect={handleRepoSelect}
@@ -1189,15 +1256,18 @@ export default function ChatApp() {
               conversations={conversations}
               activeConversationId={activeConversationId}
               apiKey={apiKey}
-              onNewChat={startMobileNewChat}
+              githubToken={githubToken}
+              onNewChat={startMobileNewChatSameRepo}
+              onNewChatInAnotherRepo={startMobileNewChatInAnotherRepo}
               onOpenConversation={openMobileConversation}
               onRenameConversation={renameConversation}
               onDeleteConversation={deleteConversation}
               onSignOut={handleSignOut}
+              onClearGitHubToken={handleClearGitHubToken}
+              onSaveGitHubToken={handleSaveGitHubToken}
               defaultRepoLabel={
                 getDefaultRepo() ? repoLabel(getDefaultRepo()!) : null
               }
-              onChangeDefaultRepo={() => openRepoPicker("new-chat")}
               onCollapse={() => setMobileSidebarOpen(false)}
               collapseLabel="Close sidebar"
             />
@@ -1211,15 +1281,18 @@ export default function ChatApp() {
             conversations={conversations}
             activeConversationId={activeConversationId}
             apiKey={apiKey}
+            githubToken={githubToken}
             onNewChat={resetChat}
+            onNewChatInAnotherRepo={startNewChatInAnotherRepo}
             onOpenConversation={openConversation}
             onRenameConversation={renameConversation}
             onDeleteConversation={deleteConversation}
             onSignOut={handleSignOut}
+            onClearGitHubToken={handleClearGitHubToken}
+            onSaveGitHubToken={handleSaveGitHubToken}
             defaultRepoLabel={
               getDefaultRepo() ? repoLabel(getDefaultRepo()!) : null
             }
-            onChangeDefaultRepo={() => openRepoPicker("new-chat")}
             onCollapse={() => setSidebarOpen(false)}
             collapseLabel="Collapse sidebar"
           />
@@ -1233,6 +1306,7 @@ export default function ChatApp() {
               repos={repos}
               loading={reposLoading}
               error={reposError}
+              githubToken={githubToken}
               initialRepoUrl={activeConversation?.repoUrl || getDefaultRepo()}
               initialBranch={
                 activeConversation?.branch || getDefaultBranch() || DEFAULT_BRANCH
@@ -1346,29 +1420,52 @@ function SidebarPanel({
   conversations,
   activeConversationId,
   apiKey,
+  githubToken,
   onNewChat,
+  onNewChatInAnotherRepo,
   onOpenConversation,
   onRenameConversation,
   onDeleteConversation,
   onSignOut,
+  onClearGitHubToken,
+  onSaveGitHubToken,
   defaultRepoLabel,
-  onChangeDefaultRepo,
   onCollapse,
   collapseLabel
 }: {
   conversations: Conversation[];
   activeConversationId: string;
   apiKey: string;
+  githubToken?: string | null;
   onNewChat: () => void;
+  onNewChatInAnotherRepo: () => void;
   onOpenConversation: (conversation: Conversation) => void;
   onRenameConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onSignOut: () => void;
+  onClearGitHubToken: () => void;
+  onSaveGitHubToken: (token: string) => boolean;
   defaultRepoLabel?: string | null;
-  onChangeDefaultRepo?: () => void;
   onCollapse: () => void;
   collapseLabel: string;
 }) {
+  const [showGitHubForm, setShowGitHubForm] = useState(false);
+  const [githubInput, setGithubInput] = useState("");
+  const [githubError, setGithubError] = useState<string | null>(null);
+
+  function handleSaveGitHub(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setGithubError(null);
+
+    if (!onSaveGitHubToken(githubInput)) {
+      setGithubError("Enter a valid GitHub token.");
+      return;
+    }
+
+    setGithubInput("");
+    setShowGitHubForm(false);
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col p-3">
       <div className="flex items-center justify-between gap-2">
@@ -1383,55 +1480,35 @@ function SidebarPanel({
         </button>
       </div>
 
-      <div className="mt-4 space-y-1">
+      <div className="mt-4 space-y-2">
         <SidebarButton label="New chat" icon={<IconEdit />} onClick={onNewChat} />
+        <SidebarButton
+          label="New chat in…"
+          icon={<IconSwitch />}
+          onClick={onNewChatInAnotherRepo}
+        />
       </div>
 
       <div className="mt-6 px-2 text-xs font-semibold text-[#6b6b6b]">
-        Recents
+        Projects
       </div>
 
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
-        {conversations.length === 0 ? (
-          <p className="px-3 py-2 text-sm text-[#8a8a8a]">No chats yet</p>
-        ) : (
-          <div className="space-y-1">
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                className={`group flex items-center gap-1 rounded-lg ${
-                  conversation.id === activeConversationId
-                    ? "bg-[#ececec]"
-                    : "hover:bg-[#ececec]"
-                }`}
-              >
-                <button
-                  onClick={() => onOpenConversation(conversation)}
-                  className="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm text-[#404040] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-                  title={conversation.title}
-                >
-                  {conversation.title}
-                </button>
-                <button
-                  onClick={() => onRenameConversation(conversation.id)}
-                  className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#777] transition hover:bg-[#dedede] hover:text-[#111] group-hover:flex"
-                  aria-label={`Rename ${conversation.title}`}
-                  title="Rename"
-                >
-                  <IconEdit className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => onDeleteConversation(conversation.id)}
-                  className="mr-1 hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#777] transition hover:bg-[#dedede] hover:text-[#111] group-hover:flex"
-                  aria-label={`Delete ${conversation.title}`}
-                  title="Delete"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <SidebarRecents
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onOpenConversation={(item) => {
+            const conversation = conversations.find(
+              (entry) => entry.id === item.id
+            );
+
+            if (conversation) {
+              onOpenConversation(conversation);
+            }
+          }}
+          onRenameConversation={onRenameConversation}
+          onDeleteConversation={onDeleteConversation}
+        />
       </div>
 
       <div className="mt-auto border-t border-[#ececec] pt-3">
@@ -1456,13 +1533,6 @@ function SidebarPanel({
                   </p>
                 </div>
               </div>
-              {onChangeDefaultRepo ? (
-                <SettingsAction
-                  label="New chat in another repo"
-                  icon={<IconSwitch />}
-                  onClick={onChangeDefaultRepo}
-                />
-              ) : null}
             </div>
           ) : null}
 
@@ -1471,6 +1541,73 @@ function SidebarPanel({
               defaultRepoLabel ? "mt-3 border-t border-[#ececec] pt-3" : "mt-3"
             }
           >
+            <div className="flex items-start gap-2.5">
+              <SidebarIcon>
+                <IconGitHub />
+              </SidebarIcon>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-[#8a8a8a]">GitHub token</p>
+                {githubToken ? (
+                  <p
+                    className="mt-0.5 truncate font-mono text-sm text-[#303030]"
+                    title="Connected GitHub token"
+                  >
+                    {maskApiKey(githubToken)}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-sm text-[#303030]">Not connected</p>
+                )}
+              </div>
+            </div>
+
+            {githubToken ? (
+              <SettingsAction
+                label="Clear GitHub token"
+                icon={<IconKeyOff />}
+                onClick={onClearGitHubToken}
+              />
+            ) : showGitHubForm ? (
+              <form onSubmit={handleSaveGitHub} className="mt-2 space-y-2">
+                <input
+                  type="password"
+                  value={githubInput}
+                  onChange={(event) => setGithubInput(event.target.value)}
+                  placeholder="ghp_… or github_pat_…"
+                  className="w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
+                />
+                {githubError ? (
+                  <p className="text-xs text-red-700">{githubError}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGitHubForm(false);
+                      setGithubInput("");
+                      setGithubError(null);
+                    }}
+                    className="rounded-full border border-[#d9d9d9] px-3 py-1.5 text-xs font-medium text-[#444] transition hover:bg-[#f7f7f8]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-full bg-[#0d0d0d] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#303030]"
+                  >
+                    Save token
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <SettingsAction
+                label="Add GitHub token"
+                icon={<IconGitHub className="h-4 w-4" />}
+                onClick={() => setShowGitHubForm(true)}
+              />
+            )}
+          </div>
+
+          <div className="mt-3 border-t border-[#ececec] pt-3">
             <div className="flex items-start gap-2.5">
               <SidebarIcon>
                 <IconKey />
@@ -1513,7 +1650,7 @@ function BrandBlock() {
 
 function SidebarIcon({ children }: { children: ReactNode }) {
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-[#555]">
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#555] [&>svg]:h-4 [&>svg]:w-4">
       {children}
     </span>
   );
@@ -1553,11 +1690,12 @@ function SidebarButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-[#303030] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+      className="flex w-full min-h-10 items-center gap-2.5 rounded-lg border border-[#e0e0e0] bg-white px-3 py-2.5 text-left text-sm font-medium leading-none text-[#303030] shadow-sm transition hover:border-[#d4d4d4] hover:bg-[#f8f8f8] active:border-[#cccccc] active:bg-[#f0f0f0] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
     >
       <SidebarIcon>{icon}</SidebarIcon>
-      <span>{label}</span>
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -1593,6 +1731,19 @@ function IconFolder({ className = "h-[18px] w-[18px]" }: { className?: string })
       strokeLinejoin="round"
     >
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+function IconGitHub({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M12 2C6.477 2 2 6.586 2 12.253c0 4.336 2.865 7.996 6.839 9.288.5.092.682-.218.682-.483 0-.237-.009-.866-.013-1.699-2.782.621-3.369-1.349-3.369-1.349-.454-1.178-1.11-1.491-1.11-1.491-.908-.637.069-.624.069-.624 1.004.071 1.532 1.051 1.532 1.051.892 1.561 2.341 1.111 2.91.85.092-.662.35-1.111.636-1.367-2.221-.259-4.555-1.14-4.555-5.071 0-1.119.39-2.034 1.029-2.751-.103-.259-.446-1.308.098-2.727 0 0 .84-.273 2.75 1.037A9.3 9.3 0 0 1 12 6.836c.85.004 1.705.116 2.504.337 1.909-1.31 2.747-1.037 2.747-1.037.546 1.42.203 2.468.1 2.727.64.717 1.028 1.632 1.028 2.751 0 3.943-2.337 4.809-4.564 5.063.359.317.678.941.678 1.896 0 1.368-.012 2.47-.012 2.807 0 .268.18.58.688.481A10.02 10.02 0 0 0 22 12.253C22 6.586 17.523 2 12 2Z" />
     </svg>
   );
 }
@@ -1752,7 +1903,7 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
     <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center">
       <div className="w-full py-10 text-center sm:py-16">
         <h2 className="text-2xl font-medium tracking-tight text-[#202123] sm:text-[28px]">
-          Ask your codebase anything
+          Ask Cursor anything about your repo
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#5f6368]">
           Questions are answered from the repository selected in the header,
@@ -1795,7 +1946,10 @@ function MessageBubble({
   const hasImageAttachments = imageAttachments.length > 0;
   const hasPdfAttachments = pdfAttachments.length > 0;
   const isStreaming = message.streaming === true;
-  const showStreamingPlaceholder = isStreaming && !message.content.trim();
+  const showStreamingPlaceholder =
+    isStreaming && !message.content.trim() && !message.thinking?.trim();
+  const showActivity =
+    isStreaming && message.activity && message.activity !== "Thinking…";
 
   return (
     <article
@@ -1852,6 +2006,9 @@ function MessageBubble({
                   : "px-1 py-1 text-[#111]"
             }
           >
+            {!isUser && message.thinking?.trim() ? (
+              <ThinkingPanel content={message.thinking} streaming={isStreaming} />
+            ) : null}
             <MarkdownMessage content={message.content} isUser={isUser} />
             {showStreamingPlaceholder ? (
               <div className="mt-2 space-y-2">
@@ -1859,7 +2016,7 @@ function MessageBubble({
                 <div className="h-3 w-48 max-w-full animate-pulse rounded-full bg-[#ececec]" />
               </div>
             ) : null}
-            {isStreaming && message.activity ? (
+            {showActivity ? (
               <p className="mt-3 text-sm text-[#8a8a8a]">{message.activity}</p>
             ) : null}
             {!isUser && !message.error && message.sources?.length ? (
@@ -1917,6 +2074,69 @@ function MessageBubble({
         </div>
       </div>
     </article>
+  );
+}
+
+function ThinkingPanel({
+  content,
+  streaming
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  const [open, setOpen] = useState(Boolean(streaming));
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (streaming) {
+      setOpen(true);
+    } else {
+      setOpen(false);
+    }
+  }, [streaming]);
+
+  useEffect(() => {
+    if (!streaming || !open || !previewRef.current) return;
+    previewRef.current.scrollTop = previewRef.current.scrollHeight;
+  }, [content, streaming, open]);
+
+  return (
+    <div className="mb-3 rounded-xl border border-[#ececec] bg-[#fafafa]">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-[#555] transition hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+        aria-expanded={open}
+      >
+        <span className="font-medium">{streaming ? "Thinking…" : "Thinking"}</span>
+        <IconChevron open={open} />
+      </button>
+      {open ? (
+        <div
+          ref={previewRef}
+          className="max-h-40 overflow-y-auto border-t border-[#ececec] px-3 py-2.5"
+        >
+          <p className="whitespace-pre-wrap text-xs leading-5 text-[#666]">{content}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function IconChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={`h-4 w-4 text-[#777] transition ${open ? "rotate-180" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }
 

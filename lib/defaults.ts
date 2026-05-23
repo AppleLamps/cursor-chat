@@ -1,8 +1,16 @@
-export const APP_NAME = "Codebase Chat";
+export const APP_NAME = "AskCursor";
 
 export const DEFAULT_BRANCH = "main";
 
 export const CURSOR_MODEL = "composer-2.5";
+
+export const BRANCH_PRESETS = [
+  "main",
+  "master",
+  "develop",
+  "staging",
+  "production"
+] as const;
 
 export const SUGGESTED_PROMPTS = [
   "What does this repository do?",

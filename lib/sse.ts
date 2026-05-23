@@ -1,6 +1,7 @@
 export type ChatStreamEventName =
   | "agent"
   | "text"
+  | "thinking"
   | "tool"
   | "source"
   | "status"

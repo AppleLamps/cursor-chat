@@ -44,3 +44,29 @@ export async function fetchRepositories(apiKey: string) {
 
   return data.repos ?? [];
 }
+
+export type BranchListResult = {
+  branches: string[];
+  defaultBranch?: string;
+};
+
+export async function fetchBranches(repoUrl: string, githubToken: string) {
+  const response = await fetch("/api/branches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repoUrl, githubToken })
+  });
+
+  const data = (await response.json().catch(() => ({}))) as BranchListResult & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load branches.");
+  }
+
+  return {
+    branches: data.branches ?? [],
+    defaultBranch: data.defaultBranch
+  };
+}

@@ -13,6 +13,7 @@ import {
   rateLimitedResponse
 } from "@/lib/rate-limit";
 import { extractSourcePaths } from "@/lib/sources";
+import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
 
 type ChatRequest = {
@@ -143,7 +144,7 @@ export async function POST(request: Request) {
             }
 
             if (update.type === "thinking-delta" && update.text) {
-              send("status", { message: "Thinking…" });
+              send("thinking", { delta: update.text });
             }
           }
         });
@@ -166,7 +167,7 @@ export async function POST(request: Request) {
           }
 
           if (event.type === "thinking" && event.text) {
-            send("status", { message: "Thinking…" });
+            send("thinking", { delta: event.text });
             continue;
           }
 
@@ -193,11 +194,23 @@ export async function POST(request: Request) {
           return;
         }
 
+        let thinking: string | undefined;
+
+        if (run.supports("conversation")) {
+          try {
+            const turns = await run.conversation();
+            thinking = extractThinkingFromConversation(turns);
+          } catch {
+            // Fall back to whatever thinking streamed during the run.
+          }
+        }
+
         send("done", {
           agentId: agent.agentId,
           runId: result.id,
           status: result.status,
-          result: result.result
+          result: result.result,
+          thinking
         });
       } catch (error) {
         if (error instanceof CursorAgentError) {

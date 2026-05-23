@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import BranchPicker from "@/components/BranchPicker";
 import { APP_NAME, DEFAULT_BRANCH } from "@/lib/defaults";
 import { RepoOption, filterRepos, repoLabel } from "@/lib/repo";
 
@@ -10,6 +11,7 @@ type RepoPickerProps = {
   error: string | null;
   initialRepoUrl?: string | null;
   initialBranch?: string;
+  githubToken?: string | null;
   title?: string;
   description?: string;
   submitLabel?: string;
@@ -25,6 +27,7 @@ export default function RepoPicker({
   error,
   initialRepoUrl,
   initialBranch = DEFAULT_BRANCH,
+  githubToken,
   title = "Choose a repository",
   description = "Pick the codebase this conversation should answer questions about.",
   submitLabel = "Continue",
@@ -186,23 +189,12 @@ export default function RepoPicker({
             )}
           </div>
 
-          <div className="mt-4 rounded-xl border border-[#ececec] bg-[#fafafa] p-4">
-            <label htmlFor="repo-branch" className="block text-sm font-medium text-[#333]">
-              Branch
-            </label>
-            <input
-              id="repo-branch"
-              type="text"
-              value={branch}
-              onChange={(event) => setBranch(event.target.value)}
-              placeholder={DEFAULT_BRANCH}
-              className="mt-2 w-full rounded-xl border border-[#d9d9d9] bg-white px-4 py-3 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
-            />
-            <p className="mt-2 text-xs leading-5 text-[#8a8a8a]">
-              Used for source links in answers. Defaults to{" "}
-              <span className="font-medium text-[#666]">{DEFAULT_BRANCH}</span>.
-            </p>
-          </div>
+          <BranchPicker
+            repoUrl={selectedRepoUrl}
+            githubToken={githubToken}
+            branch={branch}
+            onBranchChange={setBranch}
+          />
 
           <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm text-[#444]">
             <input

@@ -2,14 +2,19 @@
 
 import { FormEvent, useState } from "react";
 import { APP_NAME } from "@/lib/defaults";
-import { isPlausibleApiKey } from "@/lib/storage";
+import { isPlausibleApiKey, isPlausibleGitHubToken } from "@/lib/storage";
 
 type OnboardingProps = {
-  onComplete: (apiKey: string, remember: boolean) => void;
+  onComplete: (payload: {
+    apiKey: string;
+    githubToken?: string;
+    remember: boolean;
+  }) => void;
 };
 
 export default function Onboarding({ onComplete }: OnboardingProps) {
   const [apiKey, setApiKey] = useState("");
+  const [githubToken, setGithubToken] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,14 +22,24 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     event.preventDefault();
     setError(null);
 
-    const trimmed = apiKey.trim();
+    const trimmedKey = apiKey.trim();
+    const trimmedGitHub = githubToken.trim();
 
-    if (!isPlausibleApiKey(trimmed)) {
+    if (!isPlausibleApiKey(trimmedKey)) {
       setError("Enter a valid Cursor API key (at least 12 characters).");
       return;
     }
 
-    onComplete(trimmed, remember);
+    if (trimmedGitHub && !isPlausibleGitHubToken(trimmedGitHub)) {
+      setError("Enter a valid GitHub token or leave the GitHub field blank.");
+      return;
+    }
+
+    onComplete({
+      apiKey: trimmedKey,
+      githubToken: trimmedGitHub || undefined,
+      remember
+    });
   }
 
   return (
@@ -39,7 +54,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </h1>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#5f6368]">
             Paste a Cursor API key to ask questions about your repositories. Your
-            key stays on this device unless you choose to remember it.
+            keys stay on this device unless you choose to remember them.
           </p>
         </div>
 
@@ -60,6 +75,49 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             placeholder="cursor_…"
             className="mt-2 w-full rounded-xl border border-[#d9d9d9] bg-[#fafafa] px-4 py-3 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:bg-white focus:ring-2 focus:ring-[#ececec]"
           />
+
+          <div className="mt-5 rounded-xl border border-[#ececec] bg-[#fafafa] p-4">
+            <label
+              htmlFor="github-token"
+              className="block text-sm font-medium text-[#333]"
+            >
+              GitHub token{" "}
+              <span className="font-normal text-[#8a8a8a]">(optional)</span>
+            </label>
+            <input
+              id="github-token"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={githubToken}
+              onChange={(event) => setGithubToken(event.target.value)}
+              placeholder="ghp_… or github_pat_…"
+              className="mt-2 w-full rounded-xl border border-[#d9d9d9] bg-white px-4 py-3 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
+            />
+            <p className="mt-3 text-xs leading-5 text-[#5f6368]">
+              Adds a real branch picker when you choose a repository. Without it,
+              you can still type common branch names manually.
+            </p>
+            <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-xs leading-5 text-[#5f6368]">
+              <li>
+                Open{" "}
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo&description=AskCursor"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-[#444] underline underline-offset-2 hover:text-[#111]"
+                >
+                  GitHub token settings
+                </a>
+              </li>
+              <li>Create a classic token with the <strong>repo</strong> scope</li>
+              <li>Paste the token here and continue</li>
+            </ol>
+            <p className="mt-3 text-xs leading-5 text-[#8a8a8a]">
+              Used only to list branches. Sent to this app&apos;s server, then to
+              GitHub. Never stored on the server.
+            </p>
+          </div>
 
           <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm text-[#444]">
             <input
@@ -91,7 +149,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         </form>
 
         <p className="mt-5 text-center text-xs leading-5 text-[#8a8a8a]">
-          Create a key in the{" "}
+          Create a Cursor key in the{" "}
           <a
             href="https://cursor.com/dashboard/integrations"
             target="_blank"
@@ -100,8 +158,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           >
             Cursor integrations dashboard
           </a>
-          . The key is sent to this app&apos;s server when loading repositories
-          and when sending messages. It is never stored on the server.
+          .
         </p>
       </div>
     </main>
