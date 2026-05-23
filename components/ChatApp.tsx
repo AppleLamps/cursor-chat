@@ -1996,14 +1996,18 @@ function MessageBubble({
           </div>
         ) : null}
 
-        <div className={isUser ? "flex justify-end" : "flex justify-start"}>
+        <div
+          className={
+            isUser ? "flex justify-end" : "flex w-full justify-start"
+          }
+        >
           <div
             className={
               isUser
                 ? "rounded-[1.35rem] bg-[#0d0d0d] px-4 py-3 text-white"
                 : message.error
-                  ? "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950"
-                  : "px-1 py-1 text-[#111]"
+                  ? "w-full min-w-0 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950"
+                  : "w-full min-w-0 px-1 py-1 text-[#111]"
             }
           >
             {!isUser && message.thinking?.trim() ? (
@@ -2101,7 +2105,7 @@ function ThinkingPanel({
   }, [content, streaming, open]);
 
   return (
-    <div className="mb-3 rounded-xl border border-[#ececec] bg-[#fafafa]">
+    <div className="mb-3 w-full rounded-xl border border-[#ececec] bg-[#fafafa]">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
@@ -2199,7 +2203,7 @@ function MarkdownMessage({
 }) {
   return (
     <div
-      className={`message-content text-[15px] leading-7 ${
+      className={`message-content w-full min-w-0 text-[15px] leading-7 ${
         isUser ? "message-content-user" : "message-content-assistant"
       }`}
     >
