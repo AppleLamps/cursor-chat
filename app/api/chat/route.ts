@@ -1,11 +1,13 @@
 import { Agent, CursorAgentError } from "@cursor/sdk";
-import type { Run } from "@cursor/sdk";
+import type { Run, RunResult } from "@cursor/sdk";
 import { NextResponse } from "next/server";
+import { isImplementMode, parseAgentMode } from "@/lib/agent-mode";
 import {
   buildFirstAgentMessage,
   buildUserPrompt,
   defaultImagePrompt
 } from "@/lib/cursor-prompt";
+import type { AgentMode } from "@/lib/defaults";
 import { CURSOR_MODEL, DEFAULT_BRANCH } from "@/lib/defaults";
 import {
   MAX_CHAT_BODY_BYTES,
@@ -27,6 +29,7 @@ type ChatRequest = {
   repoUrl?: string;
   branch?: string;
   agentId?: string;
+  agentMode?: AgentMode;
   images?: Array<{ url?: string; mimeType?: string }>;
 };
 
@@ -42,6 +45,7 @@ type StreamRunContext = {
   apiKey: string;
   repoUrl: string;
   branch: string;
+  agentMode: AgentMode;
   promptText: string;
   sdkImages: ReturnType<typeof chatImagesToSdk>;
   agentId?: string;
@@ -106,14 +110,26 @@ async function streamRunEvents(
   }
 }
 
-async function createCloudAgent(apiKey: string, repoUrl: string, branch: string) {
+function extractPrUrl(result: RunResult): string | undefined {
+  return result.git?.branches?.find((branch) => branch.prUrl)?.prUrl;
+}
+
+async function createCloudAgent(
+  apiKey: string,
+  repoUrl: string,
+  branch: string,
+  agentMode: AgentMode
+) {
+  const cloudBase = {
+    repos: [{ url: repoUrl, startingRef: branch }]
+  };
+
   return Agent.create({
     apiKey,
     model: { id: CURSOR_MODEL },
-    cloud: {
-      repos: [{ url: repoUrl, startingRef: branch }],
-      skipReviewerRequest: true
-    }
+    cloud: isImplementMode(agentMode)
+      ? { ...cloudBase, autoCreatePR: true }
+      : { ...cloudBase, skipReviewerRequest: true }
   });
 }
 
@@ -121,17 +137,18 @@ async function startFirstRun({
   apiKey,
   repoUrl,
   branch,
+  agentMode,
   promptText,
   sdkImages,
   send
 }: Omit<StreamRunContext, "agentId">) {
-  const agent = await createCloudAgent(apiKey, repoUrl, branch);
+  const agent = await createCloudAgent(apiKey, repoUrl, branch, agentMode);
   send("agent", { agentId: agent.agentId });
 
   let streamedTextLength = 0;
   const agentMessage = buildFirstAgentMessage(
     promptText,
-    { repoUrl, branch },
+    { repoUrl, branch, mode: agentMode },
     sdkImages.length > 0 ? sdkImages : undefined
   );
 
@@ -150,6 +167,7 @@ async function startFollowUpRun({
   apiKey,
   repoUrl,
   branch,
+  agentMode,
   promptText,
   sdkImages,
   agentId,
@@ -175,6 +193,7 @@ async function startFollowUpRun({
       apiKey,
       repoUrl,
       branch,
+      agentMode,
       promptText,
       sdkImages,
       send
@@ -204,17 +223,21 @@ export async function POST(request: Request) {
   const tooLarge = bodyTooLargeResponse(request, MAX_CHAT_BODY_BYTES);
   if (tooLarge) return tooLarge;
 
-  const rateLimit = checkRateLimit("chat", request);
-  if (!rateLimit.allowed) {
-    return rateLimitedResponse(rateLimit.retryAfterSeconds);
-  }
-
   let body: ChatRequest;
 
   try {
     body = (await request.json()) as ChatRequest;
   } catch {
     return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
+  }
+
+  const agentMode = parseAgentMode(body.agentMode);
+  const rateLimit = checkRateLimit(
+    isImplementMode(agentMode) ? "chatImplement" : "chat",
+    request
+  );
+  if (!rateLimit.allowed) {
+    return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 
   const apiKey = body.apiKey?.trim();
@@ -264,6 +287,7 @@ export async function POST(request: Request) {
           apiKey,
           repoUrl,
           branch,
+          agentMode,
           promptText,
           sdkImages,
           agentId,
@@ -318,7 +342,8 @@ export async function POST(request: Request) {
           runId: result.id,
           status: result.status,
           result: finalResult,
-          thinking
+          thinking,
+          prUrl: extractPrUrl(result)
         });
       } catch (error) {
         if (error instanceof CursorAgentError) {

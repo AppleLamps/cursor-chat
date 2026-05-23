@@ -10,6 +10,7 @@ const buckets = new Map<string, Bucket>();
 /** Per IP, per route. Good enough for single-node and casual public deploys. */
 export const RATE_LIMITS = {
   chat: { limit: 12, windowMs: 60_000 },
+  chatImplement: { limit: 6, windowMs: 60_000 },
   repos: { limit: 30, windowMs: 60_000 },
   branches: { limit: 60, windowMs: 60_000 }
 } as const;

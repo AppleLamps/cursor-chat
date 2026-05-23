@@ -15,16 +15,25 @@ import Onboarding from "@/components/Onboarding";
 import RepoPicker from "@/components/RepoPicker";
 import SidebarRecents from "@/components/SidebarRecents";
 import { consumeChatStream } from "@/lib/chat-stream";
+import { isImplementMode, parseAgentMode } from "@/lib/agent-mode";
 import { createStreamBuffer } from "@/lib/stream-buffer";
 import { mergeThinkingText } from "@/lib/thinking";
 import { MAX_CHAT_IMAGES } from "@/lib/chat-images";
-import { APP_NAME, DEFAULT_BRANCH, SUGGESTED_PROMPTS } from "@/lib/defaults";
+import {
+  APP_NAME,
+  DEFAULT_AGENT_MODE,
+  DEFAULT_BRANCH,
+  SUGGESTED_IMPLEMENT_PROMPTS,
+  SUGGESTED_PROMPTS,
+  type AgentMode
+} from "@/lib/defaults";
 import { RepoOption, fetchRepositories, repoLabel } from "@/lib/repo";
 import { githubBlobUrl, uniqueSortedSources } from "@/lib/sources";
 import {
   STORAGE_KEYS,
   clearStoredApiKey,
   clearStoredGitHubToken,
+  getDefaultAgentMode,
   getDefaultBranch,
   getDefaultRepo,
   getRememberKey,
@@ -34,6 +43,7 @@ import {
   maskApiKey,
   persistApiKey,
   persistGitHubToken,
+  setDefaultAgentMode,
   setDefaultBranch,
   setDefaultRepo
 } from "@/lib/storage";
@@ -53,6 +63,7 @@ type Message = {
   activity?: string;
   thinking?: string;
   sources?: string[];
+  prUrl?: string;
 };
 
 type ImageAttachment = {
@@ -78,6 +89,7 @@ type Conversation = {
   repoUrl?: string;
   branch?: string;
   agentId?: string;
+  agentMode?: AgentMode;
 };
 
 type RepoPickerMode = "initial" | "new-chat" | "change";
@@ -163,7 +175,19 @@ function titleFromMessages(messages: Message[]) {
   return text.length > 52 ? `${text.slice(0, 49)}…` : text;
 }
 
-function createConversation(repoUrl?: string, branch?: string): Conversation {
+function agentModeLabel(mode: AgentMode) {
+  return mode === "implement" ? "Implement" : "Ask";
+}
+
+function resolveConversationAgentMode(conversation?: Conversation | null): AgentMode {
+  return parseAgentMode(conversation?.agentMode);
+}
+
+function createConversation(
+  repoUrl?: string,
+  branch?: string,
+  agentMode: AgentMode = DEFAULT_AGENT_MODE
+): Conversation {
   const now = new Date().toISOString();
 
   return {
@@ -173,7 +197,8 @@ function createConversation(repoUrl?: string, branch?: string): Conversation {
     updatedAt: now,
     messages: [],
     repoUrl,
-    branch: branch || DEFAULT_BRANCH
+    branch: branch || DEFAULT_BRANCH,
+    agentMode
   };
 }
 
@@ -322,6 +347,13 @@ function isConversation(value: unknown): value is Conversation {
   );
 }
 
+function normalizeConversation(conversation: Conversation): Conversation {
+  return {
+    ...conversation,
+    agentMode: parseAgentMode(conversation.agentMode)
+  };
+}
+
 function stripPrivateConversationFields(conversation: Conversation) {
   const {
     systemPrompt: _systemPrompt,
@@ -368,9 +400,20 @@ export default function ChatApp() {
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeConversationId
   );
+  const activeAgentMode = resolveConversationAgentMode(activeConversation);
   const activeRepoLabel = activeConversation?.repoUrl
     ? `${repoLabel(activeConversation.repoUrl)} · ${activeConversation.branch || DEFAULT_BRANCH}`
     : "Select repository";
+  const latestPrUrl = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.prUrl)?.prUrl;
+  const implementModeNote =
+    isImplementMode(activeAgentMode) && messages.length === 0
+      ? "This chat can modify the repo and may open a pull request."
+      : null;
+  const resolvedComposerNote = composerNote ?? implementModeNote;
+
+  const canChangeAgentMode = messages.length === 0;
 
   const canSend =
     (input.trim().length > 0 || pendingImages.length > 0) &&
@@ -391,7 +434,10 @@ export default function ChatApp() {
       const parsed = stored ? (JSON.parse(stored) as unknown) : [];
       const saved = Array.isArray(parsed)
         ? sortConversations(
-            parsed.filter(isConversation).map(stripPrivateConversationFields)
+            parsed
+              .filter(isConversation)
+              .map(stripPrivateConversationFields)
+              .map(normalizeConversation)
           )
         : [];
 
@@ -449,7 +495,8 @@ export default function ChatApp() {
     seededDefaultConversationRef.current = true;
     const conversation = createConversation(
       defaultRepo,
-      getDefaultBranch() || DEFAULT_BRANCH
+      getDefaultBranch() || DEFAULT_BRANCH,
+      getDefaultAgentMode()
     );
     setConversations([conversation]);
     setActiveConversationId(conversation.id);
@@ -510,11 +557,13 @@ export default function ChatApp() {
   function handleRepoSelect(
     repoUrl: string,
     branch: string,
-    rememberAsDefault: boolean
+    rememberAsDefault: boolean,
+    agentMode: AgentMode
   ) {
     if (rememberAsDefault) {
       setDefaultRepo(repoUrl);
       setDefaultBranch(branch);
+      setDefaultAgentMode(agentMode);
     }
 
     if (repoPickerMode === "change" && activeConversation) {
@@ -524,7 +573,7 @@ export default function ChatApp() {
       return;
     }
 
-    activateConversation(createConversation(repoUrl, branch));
+    activateConversation(createConversation(repoUrl, branch, agentMode));
     setRepoPickerOpen(false);
     setRepoPickerMode("initial");
     setError(null);
@@ -550,7 +599,7 @@ export default function ChatApp() {
 
   function persistActiveConversation(
     nextMessages: Message[],
-    nextAgentId?: string
+    nextAgentId?: string | null
   ) {
     if (nextMessages.length === 0) return;
 
@@ -572,7 +621,9 @@ export default function ChatApp() {
         manualTitle: existing?.manualTitle,
         repoUrl: existing?.repoUrl,
         branch: existing?.branch,
-        agentId: nextAgentId ?? existing?.agentId
+        agentId:
+          nextAgentId === null ? undefined : nextAgentId ?? existing?.agentId,
+        agentMode: resolveConversationAgentMode(existing)
       };
 
       return sortConversations([
@@ -607,11 +658,37 @@ export default function ChatApp() {
       return;
     }
 
-    activateConversation(createConversation(repoUrl, branch));
+    activateConversation(
+      createConversation(
+        repoUrl,
+        branch,
+        resolveConversationAgentMode(activeConversation)
+      )
+    );
   }
 
   function startNewChatInAnotherRepo() {
     openRepoPicker("new-chat");
+  }
+
+  function setActiveConversationAgentMode(mode: AgentMode) {
+    if (messages.length > 0) return;
+
+    const now = new Date().toISOString();
+    setConversations((current) =>
+      sortConversations(
+        current.map((conversation) =>
+          conversation.id === activeConversationId
+            ? {
+                ...conversation,
+                agentMode: mode,
+                agentId: undefined,
+                updatedAt: now
+              }
+            : conversation
+        )
+      )
+    );
   }
 
   function deleteConversation(id: string) {
@@ -728,6 +805,7 @@ export default function ChatApp() {
     let assistantThinking = "";
     let assistantActivity = "Starting Cursor cloud agent…";
     let assistantSources: string[] = [];
+    let assistantPrUrl: string | undefined;
     let resolvedAgentId = activeConversation.agentId;
     const streamingAssistant: Message = {
       id: assistantId,
@@ -766,6 +844,7 @@ export default function ChatApp() {
           repoUrl: activeConversation.repoUrl,
           branch: activeConversation.branch || DEFAULT_BRANCH,
           agentId: activeConversation.agentId,
+          agentMode: activeAgentMode,
           images: imagesForMessage.map((image) => ({
             url: image.url,
             mimeType: image.mimeType
@@ -822,6 +901,9 @@ export default function ChatApp() {
             });
             streamBuffer.setThinking(assistantThinking);
           }
+          if (payload.prUrl?.trim()) {
+            assistantPrUrl = payload.prUrl.trim();
+          }
         }
       });
 
@@ -838,12 +920,19 @@ export default function ChatApp() {
         createdAt: streamingAssistant.createdAt,
         streaming: false,
         thinking: assistantThinking || undefined,
-        sources: assistantSources
+        sources: assistantSources,
+        prUrl: assistantPrUrl
       };
       const finalMessages = [...optimisticMessages, assistantMessage];
       setMessages(finalMessages);
       persistActiveConversation(finalMessages, resolvedAgentId);
-      setComposerNote("Answer generated by Cursor cloud agent.");
+      setComposerNote(
+        assistantPrUrl
+          ? "Changes submitted. Pull request link is in the answer."
+          : isImplementMode(activeAgentMode)
+            ? "Task completed by Cursor cloud agent."
+            : "Answer generated by Cursor cloud agent."
+      );
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "Something went wrong.";
@@ -858,7 +947,7 @@ export default function ChatApp() {
       const finalMessages = [...optimisticMessages, errorMessage];
       setError(message);
       setMessages(finalMessages);
-      persistActiveConversation(finalMessages);
+      persistActiveConversation(finalMessages, null);
     } finally {
       setIsSending(false);
       inputRef.current?.focus();
@@ -1236,6 +1325,7 @@ export default function ChatApp() {
         error={reposError}
         githubToken={githubToken}
         initialBranch={getDefaultBranch() || DEFAULT_BRANCH}
+        initialAgentMode={getDefaultAgentMode()}
         onRetry={() => void loadRepositories(apiKey)}
         onSelect={handleRepoSelect}
       />
@@ -1311,6 +1401,12 @@ export default function ChatApp() {
               initialBranch={
                 activeConversation?.branch || getDefaultBranch() || DEFAULT_BRANCH
               }
+              initialAgentMode={
+                repoPickerMode === "new-chat"
+                  ? getDefaultAgentMode()
+                  : activeAgentMode
+              }
+              allowModeSelection={repoPickerMode !== "change"}
               title={
                 repoPickerMode === "new-chat"
                   ? "Start a chat in another repository"
@@ -1318,8 +1414,8 @@ export default function ChatApp() {
               }
               description={
                 repoPickerMode === "new-chat"
-                  ? "Choose which codebase the new conversation should use."
-                  : "Update which codebase this conversation should answer questions about."
+                  ? undefined
+                  : "Update which codebase this conversation should use."
               }
               submitLabel={repoPickerMode === "new-chat" ? "Start chat" : "Save"}
               onRetry={() => void loadRepositories(apiKey)}
@@ -1335,6 +1431,10 @@ export default function ChatApp() {
             shareStatus={shareStatus}
             sidebarOpen={sidebarOpen}
             repoLabel={activeRepoLabel}
+            agentMode={activeAgentMode}
+            canChangeAgentMode={canChangeAgentMode}
+            onAgentModeChange={setActiveConversationAgentMode}
+            prUrl={latestPrUrl}
             onChangeRepo={() =>
               openRepoPicker(activeConversation?.repoUrl ? "change" : "initial")
             }
@@ -1348,6 +1448,8 @@ export default function ChatApp() {
           >
             {messages.length === 0 ? (
               <EmptyState
+                agentMode={activeAgentMode}
+                onAgentModeChange={setActiveConversationAgentMode}
                 onPick={(prompt) => {
                   setInput(prompt);
                   inputRef.current?.focus();
@@ -1390,7 +1492,12 @@ export default function ChatApp() {
               isSending={isSending}
               isReadingFiles={isReadingFiles}
               isListening={isListening}
-              note={composerNote}
+              note={resolvedComposerNote}
+              placeholder={
+                isImplementMode(activeAgentMode)
+                  ? "Describe the change you want. Enter sends, Shift+Enter adds a line."
+                  : "Ask about this repository. Enter sends, Shift+Enter adds a line."
+              }
               onAttachClick={() => fileInputRef.current?.click()}
               onHostedImageClick={addHostedImageUrl}
               onRemoveImage={removePendingImage}
@@ -1808,6 +1915,51 @@ function IconSwitch({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
+function ModeToggle({
+  agentMode,
+  onChange,
+  size = "default"
+}: {
+  agentMode: AgentMode;
+  onChange: (mode: AgentMode) => void;
+  size?: "default" | "compact";
+}) {
+  const compact = size === "compact";
+
+  return (
+    <div
+      role="group"
+      aria-label="Chat mode"
+      className={`inline-flex rounded-full border border-[#d9d9d9] bg-[#f7f7f8] p-0.5 ${
+        compact ? "" : "mx-auto"
+      }`}
+    >
+      {(["qa", "implement"] as const).map((mode) => {
+        const selected = agentMode === mode;
+        const label = mode === "qa" ? "Ask" : "Implement";
+
+        return (
+          <button
+            key={mode}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(mode)}
+            className={`rounded-full px-3 font-medium transition focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] ${
+              compact ? "py-1 text-[10px] uppercase tracking-[0.08em]" : "py-2 text-sm"
+            } ${
+              selected
+                ? "bg-white text-[#202123] shadow-sm"
+                : "text-[#666] hover:text-[#333]"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Header({
   onReset,
   onShare,
@@ -1815,6 +1967,10 @@ function Header({
   shareStatus,
   sidebarOpen,
   repoLabel,
+  agentMode,
+  canChangeAgentMode,
+  onAgentModeChange,
+  prUrl,
   onChangeRepo,
   onToggleSidebar,
   onOpenMobileSidebar
@@ -1825,6 +1981,10 @@ function Header({
   shareStatus: string | null;
   sidebarOpen: boolean;
   repoLabel: string;
+  agentMode: AgentMode;
+  canChangeAgentMode: boolean;
+  onAgentModeChange: (mode: AgentMode) => void;
+  prUrl?: string;
   onChangeRepo: () => void;
   onToggleSidebar: () => void;
   onOpenMobileSidebar: () => void;
@@ -1869,7 +2029,44 @@ function Header({
           >
             {repoLabel}
           </button>
+          {canChangeAgentMode ? (
+            <ModeToggle
+              agentMode={agentMode}
+              onChange={onAgentModeChange}
+              size="compact"
+            />
+          ) : (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                isImplementMode(agentMode)
+                  ? "bg-[#fff4e5] text-[#9a5b00]"
+                  : "bg-[#f1f1f1] text-[#666]"
+              }`}
+              title="Mode is locked after the first message. Start a new chat to switch."
+            >
+              {agentModeLabel(agentMode)}
+            </span>
+          )}
+          {prUrl ? (
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 rounded-full border border-[#d9d9d9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#333] transition hover:bg-[#f7f7f8]"
+            >
+              PR
+            </a>
+          ) : null}
         </div>
+        {canChangeAgentMode ? (
+          <div className="flex min-w-0 items-center md:hidden">
+            <ModeToggle
+              agentMode={agentMode}
+              onChange={onAgentModeChange}
+              size="compact"
+            />
+          </div>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <button
@@ -1898,19 +2095,40 @@ function Header({
   );
 }
 
-function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
+function EmptyState({
+  agentMode,
+  onAgentModeChange,
+  onPick
+}: {
+  agentMode: AgentMode;
+  onAgentModeChange: (mode: AgentMode) => void;
+  onPick: (prompt: string) => void;
+}) {
+  const prompts = isImplementMode(agentMode)
+    ? SUGGESTED_IMPLEMENT_PROMPTS
+    : SUGGESTED_PROMPTS;
+
   return (
     <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center">
       <div className="w-full py-10 text-center sm:py-16">
-        <h2 className="text-2xl font-medium tracking-tight text-[#202123] sm:text-[28px]">
-          Ask Cursor anything about your repo
+        <ModeToggle agentMode={agentMode} onChange={onAgentModeChange} />
+        <h2 className="mt-6 text-2xl font-medium tracking-tight text-[#202123] sm:text-[28px]">
+          {isImplementMode(agentMode)
+            ? "Describe a change for Cursor to implement"
+            : "Ask Cursor anything about your repo"}
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#5f6368]">
-          Questions are answered from the repository selected in the header,
-          with sources you can verify.
+          {isImplementMode(agentMode)
+            ? "Tasks run against the repository selected in the header. The agent can edit code and may open a pull request."
+            : "Questions are answered from the repository selected in the header, with sources you can verify."}
         </p>
+        {isImplementMode(agentMode) ? (
+          <p className="mx-auto mt-3 max-w-xl text-xs leading-5 text-amber-900/80">
+            Implement mode can modify the repo. Switch to Ask above for read-only Q&A.
+          </p>
+        ) : null}
         <div className="mx-auto mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2 sm:items-start">
-          {SUGGESTED_PROMPTS.map((prompt) => (
+          {prompts.map((prompt) => (
             <button
               key={prompt}
               onClick={() => onPick(prompt)}
@@ -2023,6 +2241,16 @@ function MessageBubble({
             {showActivity ? (
               <p className="mt-3 text-sm text-[#8a8a8a]">{message.activity}</p>
             ) : null}
+            {!isUser && !message.error && message.prUrl ? (
+              <a
+                href={message.prUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] bg-white px-4 py-2 text-sm font-medium text-[#202123] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+              >
+                View pull request
+              </a>
+            ) : null}
             {!isUser && !message.error && message.sources?.length ? (
               <SourcesPanel
                 sources={message.sources}
@@ -2110,7 +2338,7 @@ function ThinkingPanel({
         type="button"
         onClick={() => setOpen((current) => !current)}
         className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-[#555] transition hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-        aria-expanded={open}
+        aria-expanded={open ? "true" : "false"}
       >
         <span className="font-medium">{streaming ? "Thinking…" : "Thinking"}</span>
         <IconChevron open={open} />
@@ -2161,7 +2389,7 @@ function SourcesPanel({
         type="button"
         onClick={() => setOpen((current) => !current)}
         className="flex w-full items-center justify-between text-left text-sm text-[#555] transition hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-        aria-expanded={open}
+        aria-expanded={open ? "true" : "false"}
       >
         <span className="font-medium">Sources ({sources.length})</span>
         <span aria-hidden="true">{open ? "▾" : "▸"}</span>
@@ -2194,6 +2422,92 @@ function SourcesPanel({
   );
 }
 
+function formatCodeLanguage(language: string) {
+  const labels: Record<string, string> = {
+    bash: "Bash",
+    css: "CSS",
+    html: "HTML",
+    js: "JavaScript",
+    javascript: "JavaScript",
+    json: "JSON",
+    jsx: "JSX",
+    md: "Markdown",
+    markdown: "Markdown",
+    py: "Python",
+    python: "Python",
+    sh: "Shell",
+    shell: "Shell",
+    sql: "SQL",
+    ts: "TypeScript",
+    tsx: "TSX",
+    txt: "Text",
+    yaml: "YAML",
+    yml: "YAML"
+  };
+
+  return labels[language.toLowerCase()] || language;
+}
+
+function MarkdownCodeBlock({
+  code,
+  language,
+  isUser
+}: {
+  code: string;
+  language?: string;
+  isUser: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await copyText(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div
+      className={`code-block my-4 overflow-hidden rounded-xl border ${
+        isUser
+          ? "border-white/20 bg-black/20"
+          : "border-[#e5e5e5] bg-[#f7f7f8]"
+      }`}
+    >
+      <div
+        className={`flex items-center justify-between gap-3 border-b px-3 py-2 ${
+          isUser ? "border-white/15" : "border-[#ececec] bg-[#f3f3f4]"
+        }`}
+      >
+        <span
+          className={`text-xs font-medium uppercase tracking-wide ${
+            isUser ? "text-white/70" : "text-[#666]"
+          }`}
+        >
+          {language ? formatCodeLanguage(language) : "Code"}
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleCopy()}
+          className={`rounded-md px-2 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 ${
+            isUser
+              ? "text-white/80 hover:bg-white/10 hover:text-white focus:ring-white/30"
+              : "text-[#555] hover:bg-white hover:text-[#111] focus:ring-[#d9d9d9]"
+          }`}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre
+        className={`overflow-x-auto text-[0.875rem] leading-6 ${
+          isUser ? "text-white" : "text-[#16181d]"
+        }`}
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 function MarkdownMessage({
   content,
   isUser
@@ -2214,7 +2528,29 @@ function MarkdownMessage({
             <a href={href} target="_blank" rel="noreferrer">
               {children}
             </a>
-          )
+          ),
+          pre: ({ children }) => <>{children}</>,
+          code: ({ className, children, ...props }) => {
+            const code = String(children).replace(/\n$/, "");
+            const languageMatch = /language-([\w+-]+)/.exec(className || "");
+            const isBlock = Boolean(languageMatch) || code.includes("\n");
+
+            if (!isBlock) {
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              );
+            }
+
+            return (
+              <MarkdownCodeBlock
+                code={code}
+                language={languageMatch?.[1]}
+                isUser={isUser}
+              />
+            );
+          }
         }}
       >
         {content}
@@ -2259,6 +2595,7 @@ function Composer({
   isReadingFiles,
   isListening,
   note,
+  placeholder,
   onAttachClick,
   onHostedImageClick,
   onRemoveImage,
@@ -2277,6 +2614,7 @@ function Composer({
   isReadingFiles: boolean;
   isListening: boolean;
   note: string | null;
+  placeholder: string;
   onAttachClick: () => void;
   onHostedImageClick: () => void;
   onRemoveImage: (id: string) => void;
@@ -2340,7 +2678,7 @@ function Composer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask about this repository. Enter sends, Shift+Enter adds a line."
+          placeholder={placeholder}
           rows={1}
           className="max-h-44 min-h-[46px] w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#9b9b9b]"
           disabled={isSending}

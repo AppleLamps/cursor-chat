@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "@/components/BranchPicker";
-import { APP_NAME, DEFAULT_BRANCH } from "@/lib/defaults";
+import { isImplementMode } from "@/lib/agent-mode";
+import { APP_NAME, DEFAULT_AGENT_MODE, DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
 import { RepoOption, filterRepos, repoLabel } from "@/lib/repo";
 
 type RepoPickerProps = {
@@ -11,13 +12,20 @@ type RepoPickerProps = {
   error: string | null;
   initialRepoUrl?: string | null;
   initialBranch?: string;
+  initialAgentMode?: AgentMode;
+  allowModeSelection?: boolean;
   githubToken?: string | null;
   title?: string;
   description?: string;
   submitLabel?: string;
   mode?: "page" | "modal";
   onRetry: () => void;
-  onSelect: (repoUrl: string, branch: string, rememberAsDefault: boolean) => void;
+  onSelect: (
+    repoUrl: string,
+    branch: string,
+    rememberAsDefault: boolean,
+    agentMode: AgentMode
+  ) => void;
   onCancel?: () => void;
 };
 
@@ -27,9 +35,11 @@ export default function RepoPicker({
   error,
   initialRepoUrl,
   initialBranch = DEFAULT_BRANCH,
+  initialAgentMode = DEFAULT_AGENT_MODE,
+  allowModeSelection = true,
   githubToken,
   title = "Choose a repository",
-  description = "Pick the codebase this conversation should answer questions about.",
+  description,
   submitLabel = "Continue",
   mode = "page",
   onRetry,
@@ -38,10 +48,17 @@ export default function RepoPicker({
 }: RepoPickerProps) {
   const [selectedRepoUrl, setSelectedRepoUrl] = useState(initialRepoUrl ?? "");
   const [branch, setBranch] = useState(initialBranch);
-  const [rememberAsDefault, setRememberAsDefault] = useState(true);
+  const [agentMode, setAgentMode] = useState<AgentMode>(initialAgentMode);
+  const [rememberAsDefault, setRememberAsDefault] = useState(allowModeSelection);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const modeDescription =
+    description ??
+    (isImplementMode(agentMode)
+      ? "Pick the codebase the agent should modify. It may commit changes and open a pull request."
+      : "Pick the codebase this conversation should answer questions about.");
 
   const filteredRepos = useMemo(
     () => filterRepos(repos, searchQuery),
@@ -58,6 +75,10 @@ export default function RepoPicker({
       setSelectedRepoUrl(repos[0].url);
     }
   }, [initialRepoUrl, repos]);
+
+  useEffect(() => {
+    setRememberAsDefault(allowModeSelection);
+  }, [allowModeSelection]);
 
   useEffect(() => {
     if (!loading && !error && repos.length > 0) {
@@ -77,7 +98,7 @@ export default function RepoPicker({
       return;
     }
 
-    onSelect(repoUrl, branchName, rememberAsDefault);
+    onSelect(repoUrl, branchName, rememberAsDefault, agentMode);
   }
 
   const form = (
@@ -189,6 +210,33 @@ export default function RepoPicker({
             )}
           </div>
 
+          {allowModeSelection ? (
+            <fieldset className="mt-5">
+              <legend className="text-sm font-medium text-[#333]">Chat mode</legend>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <ModeOption
+                  selected={agentMode === "qa"}
+                  title="Ask"
+                  description="Read-only answers about the codebase"
+                  onSelect={() => setAgentMode("qa")}
+                />
+                <ModeOption
+                  selected={agentMode === "implement"}
+                  title="Implement"
+                  description="Make scoped changes; may open a pull request"
+                  onSelect={() => setAgentMode("implement")}
+                />
+              </div>
+              {isImplementMode(agentMode) ? (
+                <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950">
+                  The agent may modify this repository and open a PR when the task
+                  requires code changes. Usage is billed to your Cursor account. The
+                  repo must allow writes and must not use read-only Cursor hooks.
+                </p>
+              ) : null}
+            </fieldset>
+          ) : null}
+
           <BranchPicker
             repoUrl={selectedRepoUrl}
             githubToken={githubToken}
@@ -252,7 +300,7 @@ export default function RepoPicker({
           <h2 id="repo-picker-title" className="text-lg font-semibold text-[#202123]">
             {title}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-[#5f6368]">{description}</p>
+          <p className="mt-2 text-sm leading-6 text-[#5f6368]">{modeDescription}</p>
           <div className="mt-4">{form}</div>
         </div>
       </div>
@@ -270,12 +318,39 @@ export default function RepoPicker({
             {title}
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#5f6368]">
-            {description}
+            {modeDescription}
           </p>
         </div>
         {form}
       </div>
     </main>
+  );
+}
+
+function ModeOption({
+  selected,
+  title,
+  description,
+  onSelect
+}: {
+  selected: boolean;
+  title: string;
+  description: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`rounded-xl border px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] ${
+        selected
+          ? "border-[#0d0d0d] bg-[#fafafa]"
+          : "border-[#ececec] hover:border-[#d9d9d9] hover:bg-[#fafafa]"
+      }`}
+    >
+      <span className="block text-sm font-medium text-[#202123]">{title}</span>
+      <span className="mt-1 block text-xs leading-5 text-[#8a8a8a]">{description}</span>
+    </button>
   );
 }
 

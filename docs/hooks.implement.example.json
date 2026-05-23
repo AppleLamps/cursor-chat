@@ -1,0 +1,16 @@
+{
+  "$comment": "Optional hooks profile for Implement mode in AskCursor. Allows git commit/push while blocking obviously destructive commands. Copy to .cursor/hooks.json in the target repository — not this app repo. Do not use alongside docs/hooks.example.json (read-only profile).",
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node -e \"const input=require('fs').readFileSync(0,'utf8')); const payload=JSON.parse(input); const cmd=(payload.command||'').toLowerCase(); const blocked=[/\\brm\\s+-rf\\b/,/\\bgit\\s+push\\s+.*(--force|-f)\\b/,/\\bgit\\s+reset\\s+--hard\\b/,/\\bgit\\s+clean\\s+-fd\\b/]; if(blocked.some((rule)=>rule.test(cmd))){console.error(JSON.stringify({permission:'deny',user_message:'Destructive shell command blocked.',agent_message:'This command is blocked for safety. Use a safer alternative.'})); process.exit(0);} console.log(JSON.stringify({permission:'allow'}));\""
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "node -e \"console.log(JSON.stringify({permission:'allow'}));\""
+      }
+    ]
+  }
+}

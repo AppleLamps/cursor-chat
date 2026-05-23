@@ -5,13 +5,17 @@
 ## Features
 
 - BYOK onboarding with optional "remember on this device" storage in browser `localStorage`
-- Repository picker backed by `Cursor.repositories.list()`
-- Cursor cloud agents via `@cursor/sdk` (`Agent.create` / `Agent.resume`)
-- Streaming answers over SSE with live tool activity
+- Optional GitHub personal access token for branch listing (stored locally like the Cursor key)
+- Repository picker backed by `Cursor.repositories.list()` with per-conversation branch selection
+- **Ask mode** (default): read-only Q&A for non-engineers
+- **Implement mode** (optional): scoped code changes with automatic pull request creation via `autoCreatePR`
+- Cursor cloud agents via `@cursor/sdk@1.0.13` (`Agent.create` / `Agent.resume`)
+- Streaming answers over SSE with live tool activity and collapsible **Thinking** panel
+- Markdown responses with styled code blocks, one-click copy, and **View pull request** links when a PR is opened
 - Image attachments (PNG, JPEG, WebP, GIF — file upload or public URL, up to 5 per message)
 - Collapsible **Sources** panel with GitHub links for files the agent read
 - Persistent local conversation history with rename and delete
-- Read-only system prompt scaled for simple and complex codebase questions
+- System prompt sent once per conversation (first message only), scaled for simple and complex questions or tasks
 - Default model: `composer-2.5` (see `lib/defaults.ts`)
 
 ## Tech Stack
@@ -55,55 +59,86 @@ npm run start
 
 ## How it works
 
-1. The browser stores the user's API key locally (optional) and conversation metadata in `localStorage`.
-2. `POST /api/repos` lists repositories available to that key.
-3. `POST /api/chat` creates or resumes a cloud agent against the selected repo and streams SSE events:
-   - `agent`, `status`, `text`, `tool`, `source`, `done`, `error`
-4. Each conversation stores a Cursor `agentId` so follow-up questions keep context.
-5. If resume fails (expired agent), the server starts a fresh cloud agent automatically.
+1. The browser stores the user's Cursor API key (optional) and conversation metadata in `localStorage`.
+2. When starting a new chat, the user picks **Ask** or **Implement** mode. Mode is locked after the first message.
+3. `POST /api/repos` lists repositories available to that key.
+4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
+5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:
+   - `agent`, `status`, `text`, `thinking`, `tool`, `source`, `done`, `error`
+6. **First message** in a conversation: `Agent.create()` then `agent.send()` with the mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
+   - **Ask mode:** read-only prompt; `skipReviewerRequest: true`
+   - **Implement mode:** implementation prompt; `autoCreatePR: true`
+7. **Follow-up messages**: `Agent.resume()` then `agent.send()` with plain user text only — the system prompt is not repeated.
+8. The `done` event may include `prUrl` when Implement mode opens a pull request.
+9. Each conversation stores a Cursor `agentId` so follow-ups keep agent context.
+10. If resume fails (expired agent), the server starts a fresh cloud agent automatically.
 
 The server is a stateless proxy: it uses the caller's API key for each request and does not persist keys.
 
-## Read-only enforcement
+## Chat modes
 
-AskCursor uses three layers:
+| Mode | Use case | Agent behavior |
+|------|----------|----------------|
+| **Ask** | PMs, support, compliance — understand the codebase | Read-only investigation and explanation |
+| **Implement** | Small scoped fixes, docs updates, tests | Edit code, commit, open a PR |
 
-1. **System prompt** (`lib/system-prompt.ts`) — instructs read-only investigation and explanation
+Implement mode requires write access to the target repo through the user's Cursor GitHub integration. Organization policies may block cloud agent pushes.
+
+## Read-only enforcement (Ask mode)
+
+Ask mode uses two active layers plus a future SDK option:
+
+1. **System prompt** (`lib/system-prompt.ts`) — sent on the **first message only** via `buildFirstAgentMessage()`. It instructs read-only investigation, depth-matched answers, an investigation playbook (README → search → tests → trace), backtick file citations, image/screenshot handling, and an engineering handoff sentence when users ask for code changes.
 2. **Repo hooks** — add `.cursor/hooks.json` in the **target repository** for hard enforcement. See [`docs/hooks.example.json`](docs/hooks.example.json).
-3. **SDK plan mode** (future) — the Cloud Agents REST API supports `mode: "plan"`, but `@cursor/sdk` v1.0.13 does not expose it yet. When the SDK adds support, wire it in `app/api/chat/route.ts`.
 
-The example hooks block destructive shell commands. MCP tools are still allowed — tighten `beforeMCPExecution` in the target repo if needed.
+The example hooks block destructive shell commands and git mutations. MCP tools are still allowed — tighten `beforeMCPExecution` in the target repo if needed.
+
+## Implement mode and repo hooks
+
+Implement mode expects the target repository **not** to use the read-only hooks profile. Optionally add [`docs/hooks.implement.example.json`](docs/hooks.implement.example.json) for a lighter safety net that still allows git commit/push.
+
+**Not used for either mode:** Cursor's Cloud Agents REST API documents `mode: "plan"`, but `@cursor/sdk@1.0.13` does not expose it. When the SDK adds a native `instructions` or system field, prefer that over embedding the prompt in the first user message.
 
 ## Security notes
 
 - API keys are sent from the browser to this app's server on repo load and chat requests, then forwarded to Cursor. They are not stored server-side.
 - Optional "remember on this device" stores the key in `localStorage`, which is readable by any script on the page (standard XSS risk).
-- **Rate limiting:** in-memory per-IP limits on `/api/chat` (12/min) and `/api/repos` (30/min). Chat requests allow up to ~20 MB bodies (for image attachments); other API routes use a smaller default cap.
+- **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account.
+- **Rate limiting:** in-memory per-IP limits on `/api/chat` (12/min Ask, 6/min Implement), `/api/repos` (30/min), and `/api/branches` (60/min). Chat requests allow up to ~20 MB bodies (for image attachments); other API routes use a smaller default cap.
 - Ensure hosting logs do not capture request bodies containing API keys.
 
 ## Project Structure
 
 ```text
 app/
-  api/chat/route.ts     Cursor SDK streaming route
-  api/repos/route.ts    Repository listing route
+  api/chat/route.ts       Cursor SDK streaming route (create/resume + SSE)
+  api/repos/route.ts      Repository listing route
+  api/branches/route.ts   GitHub branch listing route
 components/
-  ChatApp.tsx           Main chat UI
-  Onboarding.tsx        API key gate
-  RepoPicker.tsx        Repository + branch picker
+  ChatApp.tsx             Main chat UI, markdown, thinking/sources/PR links
+  Onboarding.tsx          API key gate
+  RepoPicker.tsx          Repository, branch, and mode picker
+  SidebarRecents.tsx      Conversation sidebar
 lib/
-  chat-stream.ts        SSE consumer
-  cursor-prompt.ts      System prompt wrapper
-  defaults.ts           App constants (model, prompts)
-  chat-images.ts        Image payload parsing for Cursor SDK
-  repo.ts               Repository fetch helpers
-  sources.ts            Source path extraction + GitHub links
-  sse.ts                SSE helpers
-  rate-limit.ts         In-memory per-IP rate limits + body size guard
-  storage.ts            Browser localStorage helpers
-  system-prompt.ts      Codebase Q&A instructions
+  agent-mode.ts           AgentMode parsing helpers
+  chat-stream.ts          SSE consumer (client)
+  cursor-prompt.ts        First-message vs follow-up prompt builders
+  defaults.ts             App constants (model, branch presets, prompts)
+  chat-images.ts          Image payload parsing for Cursor SDK
+  conversations.ts        Conversation types and helpers
+  github.ts               GitHub branch API helpers
+  implement-prompt.ts     Implement-mode system prompt
+  repo.ts                 Repository fetch helpers
+  sources.ts              Source path extraction + GitHub links
+  sse.ts                  SSE event types and formatting
+  stream-buffer.ts        Streaming text buffer utilities
+  thinking.ts             Thinking text extraction and merge helpers
+  rate-limit.ts           In-memory per-IP rate limits + body size guard
+  storage.ts              Browser localStorage helpers
+  system-prompt.ts        Read-only codebase Q&A instructions
 docs/
-  hooks.example.json    Example read-only hooks for target repos
+  hooks.example.json           Read-only hooks for Ask mode target repos
+  hooks.implement.example.json Optional lighter hooks for Implement mode
 ```
 
 ## Deployment
@@ -120,8 +155,10 @@ Usage is billed to each user's Cursor account through normal cloud agent consump
 
 ## Notes
 
-- Conversation history, API key (optional), and default repo live in browser `localStorage`.
-- Changing the repository on a thread clears its `agentId` so the next message starts a fresh cloud agent.
+- Conversation history, API keys (optional), default repo, and default chat mode live in browser `localStorage`.
+- Chat mode is chosen when starting a new chat and cannot be changed after the first message — start a new chat to switch modes.
+- Changing the repository or branch on a thread clears its `agentId` so the next message starts a fresh cloud agent with the system prompt re-sent.
 - Failed chat responses clear the stored `agentId` so the next retry can start clean.
-- Text-only or image+text chat (up to 5 images per message via Cursor SDK)
+- Text-only or image+text chat (up to 5 images per message via Cursor SDK).
 - PDF attachments are not supported.
+- GitHub token is only used to list branches via `/api/branches`; it is not sent to Cursor.

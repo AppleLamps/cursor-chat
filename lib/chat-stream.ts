@@ -6,6 +6,7 @@ export type ChatStreamDone = {
   status: string;
   result?: string;
   thinking?: string;
+  prUrl?: string;
 };
 
 export type ChatStreamHandlers = {
@@ -105,7 +106,8 @@ export async function consumeChatStream(
               runId,
               status,
               result: typeof data.result === "string" ? data.result : undefined,
-              thinking: typeof data.thinking === "string" ? data.thinking : undefined
+              thinking: typeof data.thinking === "string" ? data.thinking : undefined,
+              prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined
             });
           }
           break;

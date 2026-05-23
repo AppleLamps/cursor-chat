@@ -1,9 +1,14 @@
+import { parseAgentMode } from "@/lib/agent-mode";
+import type { AgentMode } from "@/lib/defaults";
+import { DEFAULT_AGENT_MODE } from "@/lib/defaults";
+
 export const STORAGE_KEYS = {
   API_KEY: "codebase-chat-api-key-v1",
   GITHUB_TOKEN: "codebase-chat-github-token-v1",
   REMEMBER_KEY: "codebase-chat-remember-key-v1",
   DEFAULT_REPO: "codebase-chat-default-repo-v1",
   DEFAULT_BRANCH: "codebase-chat-default-branch-v1",
+  DEFAULT_AGENT_MODE: "codebase-chat-default-agent-mode-v1",
   CONVERSATIONS: "codebase-chat-conversations-v1",
   SIDEBAR: "codebase-chat-sidebar-v1"
 } as const;
@@ -97,10 +102,23 @@ export function setDefaultBranch(branch: string) {
   window.localStorage.setItem(STORAGE_KEYS.DEFAULT_BRANCH, branch.trim());
 }
 
+export function getDefaultAgentMode(): AgentMode {
+  if (!isBrowser()) return DEFAULT_AGENT_MODE;
+  return parseAgentMode(
+    window.localStorage.getItem(STORAGE_KEYS.DEFAULT_AGENT_MODE)
+  );
+}
+
+export function setDefaultAgentMode(mode: AgentMode) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(STORAGE_KEYS.DEFAULT_AGENT_MODE, mode);
+}
+
 export function clearDefaultRepoSettings() {
   if (!isBrowser()) return;
   window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_REPO);
   window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_BRANCH);
+  window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_AGENT_MODE);
 }
 
 export function maskApiKey(key: string) {
