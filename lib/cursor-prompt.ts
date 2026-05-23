@@ -1,4 +1,5 @@
 import { CODEBASE_SYSTEM_PROMPT } from "@/lib/system-prompt";
+import type { SDKImage } from "@cursor/sdk";
 
 type PromptContext = {
   repoUrl?: string;
@@ -24,4 +25,19 @@ export function buildUserPrompt(userPrompt: string) {
 
 export function defaultImagePrompt() {
   return "What's in this image?";
+}
+
+export function buildFirstAgentMessage(
+  promptText: string,
+  context: PromptContext,
+  images?: SDKImage[]
+) {
+  const text = `${buildAgentInstructions(context)}
+
+---
+
+User question:
+${promptText}`;
+
+  return images?.length ? { text, images } : text;
 }

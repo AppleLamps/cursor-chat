@@ -1,9 +1,8 @@
 import { Agent, CursorAgentError } from "@cursor/sdk";
-import type { Run, SDKMessage } from "@cursor/sdk";
+import type { Run } from "@cursor/sdk";
 import { NextResponse } from "next/server";
-import { createCloudAgentRun } from "@/lib/cursor-cloud-api";
 import {
-  buildAgentInstructions,
+  buildFirstAgentMessage,
   buildUserPrompt,
   defaultImagePrompt
 } from "@/lib/cursor-prompt";
@@ -49,34 +48,37 @@ type StreamRunContext = {
   send: (event: ChatStreamEventName, data: Record<string, unknown>) => void;
 };
 
-function extractAssistantText(event: SDKMessage) {
-  if (event.type !== "assistant") return "";
+type StreamCallbacks = {
+  onTextDelta?: (delta: string) => void;
+};
 
-  return event.message.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+function createStreamCallbacks(
+  send: StreamRunContext["send"],
+  callbacks: StreamCallbacks
+) {
+  return {
+    onDelta: ({ update }: { update: { type: string; text?: string } }) => {
+      if (update.type === "text-delta" && update.text) {
+        callbacks.onTextDelta?.(update.text);
+        send("text", { delta: update.text });
+        return;
+      }
+
+      if (update.type === "thinking-delta" && update.text) {
+        send("thinking", { delta: update.text });
+      }
+    }
+  };
 }
 
-async function streamRun(
+async function streamRunEvents(
   run: Run,
   send: StreamRunContext["send"],
-  options?: { streamAssistantText?: boolean; streamThinking?: boolean }
+  options?: { streamThinking?: boolean }
 ) {
-  const streamAssistantText = options?.streamAssistantText ?? true;
-  const streamThinking = options?.streamThinking ?? true;
+  const streamThinking = options?.streamThinking ?? false;
 
   for await (const event of run.stream()) {
-    if (event.type === "assistant") {
-      if (streamAssistantText) {
-        const text = extractAssistantText(event);
-        if (text) {
-          send("text", { delta: text });
-        }
-      }
-      continue;
-    }
-
     if (event.type === "tool_call") {
       send("tool", { name: event.name, status: event.status });
 
@@ -104,6 +106,17 @@ async function streamRun(
   }
 }
 
+async function createCloudAgent(apiKey: string, repoUrl: string, branch: string) {
+  return Agent.create({
+    apiKey,
+    model: { id: CURSOR_MODEL },
+    cloud: {
+      repos: [{ url: repoUrl, startingRef: branch }],
+      skipReviewerRequest: true
+    }
+  });
+}
+
 async function startFirstRun({
   apiKey,
   repoUrl,
@@ -112,26 +125,25 @@ async function startFirstRun({
   sdkImages,
   send
 }: Omit<StreamRunContext, "agentId">) {
-  const { agentId, runId } = await createCloudAgentRun({
-    apiKey,
+  const agent = await createCloudAgent(apiKey, repoUrl, branch);
+  send("agent", { agentId: agent.agentId });
+
+  let streamedTextLength = 0;
+  const agentMessage = buildFirstAgentMessage(
     promptText,
-    images: sdkImages.length > 0 ? sdkImages : undefined,
-    instructions: buildAgentInstructions({ repoUrl, branch }),
-    mode: "plan",
-    modelId: CURSOR_MODEL,
-    repoUrl,
-    branch
+    { repoUrl, branch },
+    sdkImages.length > 0 ? sdkImages : undefined
+  );
+
+  const run = await agent.send(agentMessage, {
+    ...createStreamCallbacks(send, {
+      onTextDelta: (delta) => {
+        streamedTextLength += delta.length;
+      }
+    })
   });
 
-  send("agent", { agentId });
-
-  const run = await Agent.getRun(runId, {
-    runtime: "cloud",
-    agentId,
-    apiKey
-  });
-
-  return { agentId, run, streamAssistantText: true as const, streamThinking: true as const };
+  return { agentId: agent.agentId, run, agent, streamedTextLength };
 }
 
 async function startFollowUpRun({
@@ -142,22 +154,7 @@ async function startFollowUpRun({
   sdkImages,
   agentId,
   send
-}: StreamRunContext): Promise<
-  | {
-      agentId: string;
-      run: Run;
-      agent: null;
-      streamAssistantText: true;
-      streamThinking: true;
-    }
-  | {
-      agentId: string;
-      run: Run;
-      agent: Awaited<ReturnType<typeof Agent.create>>;
-      streamAssistantText: false;
-      streamThinking: false;
-    }
-> {
+}: StreamRunContext) {
   let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
 
   try {
@@ -174,48 +171,33 @@ async function startFollowUpRun({
       message: "Previous agent unavailable. Starting a new cloud agent…"
     });
 
-    return {
-      ...(await startFirstRun({
-        apiKey,
-        repoUrl,
-        branch,
-        promptText,
-        sdkImages,
-        send
-      })),
-      agent: null,
-      streamAssistantText: true as const,
-      streamThinking: true as const
-    };
+    return startFirstRun({
+      apiKey,
+      repoUrl,
+      branch,
+      promptText,
+      sdkImages,
+      send
+    });
   }
 
   send("agent", { agentId: agent.agentId });
 
+  let streamedTextLength = 0;
   const agentMessage =
     sdkImages.length > 0
       ? { text: promptText, images: sdkImages }
       : promptText;
 
   const run = await agent.send(agentMessage, {
-    onDelta: ({ update }) => {
-      if (update.type === "text-delta" && update.text) {
-        send("text", { delta: update.text });
-        return;
+    ...createStreamCallbacks(send, {
+      onTextDelta: (delta) => {
+        streamedTextLength += delta.length;
       }
-
-      if (update.type === "thinking-delta" && update.text) {
-        send("thinking", { delta: update.text });
-      }
-    }
+    })
   });
 
-  return {
-    agentId: agent.agentId,
-    run,
-    agent,
-    streamAssistantText: false as const,
-    streamThinking: false as const
-  };
+  return { agentId: agent.agentId, run, agent, streamedTextLength };
 }
 
 export async function POST(request: Request) {
@@ -292,13 +274,10 @@ export async function POST(request: Request) {
           ? await startFollowUpRun(runContext)
           : await startFirstRun(runContext);
 
-        disposableAgent = "agent" in started ? started.agent : null;
+        disposableAgent = started.agent;
         const resolvedAgentId = started.agentId;
 
-        await streamRun(started.run, send, {
-          streamAssistantText: started.streamAssistantText,
-          streamThinking: started.streamThinking
-        });
+        await streamRunEvents(started.run, send);
 
         const result = await started.run.wait();
 
@@ -318,6 +297,11 @@ export async function POST(request: Request) {
           return;
         }
 
+        const finalResult = result.result?.trim();
+        if (finalResult && started.streamedTextLength === 0) {
+          send("text", { delta: finalResult });
+        }
+
         let thinking: string | undefined;
 
         if (started.run.supports("conversation")) {
@@ -333,7 +317,7 @@ export async function POST(request: Request) {
           agentId: resolvedAgentId,
           runId: result.id,
           status: result.status,
-          result: result.result,
+          result: finalResult,
           thinking
         });
       } catch (error) {
