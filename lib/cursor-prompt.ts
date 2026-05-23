@@ -5,7 +5,7 @@ type PromptContext = {
   branch?: string;
 };
 
-export function wrapUserPrompt(userPrompt: string, context?: PromptContext) {
+export function buildAgentInstructions(context?: PromptContext) {
   const repoContext =
     context?.repoUrl?.trim()
       ? `Repository under investigation: ${context.repoUrl.trim()}${
@@ -15,10 +15,13 @@ export function wrapUserPrompt(userPrompt: string, context?: PromptContext) {
 
   return `${CODEBASE_SYSTEM_PROMPT}${
     repoContext ? `\n\n${repoContext}` : ""
-  }
+  }`;
+}
 
----
+export function buildUserPrompt(userPrompt: string) {
+  return userPrompt.trim();
+}
 
-User question:
-${userPrompt.trim()}`;
+export function defaultImagePrompt() {
+  return "What's in this image?";
 }

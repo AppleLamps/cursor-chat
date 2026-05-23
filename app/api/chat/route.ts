@@ -1,6 +1,12 @@
 import { Agent, CursorAgentError } from "@cursor/sdk";
+import type { Run, SDKMessage } from "@cursor/sdk";
 import { NextResponse } from "next/server";
-import { wrapUserPrompt } from "@/lib/cursor-prompt";
+import { createCloudAgentRun } from "@/lib/cursor-cloud-api";
+import {
+  buildAgentInstructions,
+  buildUserPrompt,
+  defaultImagePrompt
+} from "@/lib/cursor-prompt";
 import { CURSOR_MODEL, DEFAULT_BRANCH } from "@/lib/defaults";
 import {
   MAX_CHAT_BODY_BYTES,
@@ -32,6 +38,185 @@ const SSE_HEADERS = {
   "Cache-Control": "no-cache, no-transform",
   Connection: "keep-alive"
 };
+
+type StreamRunContext = {
+  apiKey: string;
+  repoUrl: string;
+  branch: string;
+  promptText: string;
+  sdkImages: ReturnType<typeof chatImagesToSdk>;
+  agentId?: string;
+  send: (event: ChatStreamEventName, data: Record<string, unknown>) => void;
+};
+
+function extractAssistantText(event: SDKMessage) {
+  if (event.type !== "assistant") return "";
+
+  return event.message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+async function streamRun(
+  run: Run,
+  send: StreamRunContext["send"],
+  options?: { streamAssistantText?: boolean; streamThinking?: boolean }
+) {
+  const streamAssistantText = options?.streamAssistantText ?? true;
+  const streamThinking = options?.streamThinking ?? true;
+
+  for await (const event of run.stream()) {
+    if (event.type === "assistant") {
+      if (streamAssistantText) {
+        const text = extractAssistantText(event);
+        if (text) {
+          send("text", { delta: text });
+        }
+      }
+      continue;
+    }
+
+    if (event.type === "tool_call") {
+      send("tool", { name: event.name, status: event.status });
+
+      if (event.status === "completed") {
+        for (const path of extractSourcePaths(
+          event.name,
+          event.args,
+          event.result
+        )) {
+          send("source", { path });
+        }
+      }
+
+      continue;
+    }
+
+    if (event.type === "thinking" && event.text && streamThinking) {
+      send("thinking", { delta: event.text });
+      continue;
+    }
+
+    if (event.type === "status" && event.message) {
+      send("status", { message: event.message });
+    }
+  }
+}
+
+async function startFirstRun({
+  apiKey,
+  repoUrl,
+  branch,
+  promptText,
+  sdkImages,
+  send
+}: Omit<StreamRunContext, "agentId">) {
+  const { agentId, runId } = await createCloudAgentRun({
+    apiKey,
+    promptText,
+    images: sdkImages.length > 0 ? sdkImages : undefined,
+    instructions: buildAgentInstructions({ repoUrl, branch }),
+    mode: "plan",
+    modelId: CURSOR_MODEL,
+    repoUrl,
+    branch
+  });
+
+  send("agent", { agentId });
+
+  const run = await Agent.getRun(runId, {
+    runtime: "cloud",
+    agentId,
+    apiKey
+  });
+
+  return { agentId, run, streamAssistantText: true as const, streamThinking: true as const };
+}
+
+async function startFollowUpRun({
+  apiKey,
+  repoUrl,
+  branch,
+  promptText,
+  sdkImages,
+  agentId,
+  send
+}: StreamRunContext): Promise<
+  | {
+      agentId: string;
+      run: Run;
+      agent: null;
+      streamAssistantText: true;
+      streamThinking: true;
+    }
+  | {
+      agentId: string;
+      run: Run;
+      agent: Awaited<ReturnType<typeof Agent.create>>;
+      streamAssistantText: false;
+      streamThinking: false;
+    }
+> {
+  let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
+
+  try {
+    agent = await Agent.resume(agentId!, {
+      apiKey,
+      model: { id: CURSOR_MODEL }
+    });
+  } catch (resumeError) {
+    if (!(resumeError instanceof CursorAgentError)) {
+      throw resumeError;
+    }
+
+    send("status", {
+      message: "Previous agent unavailable. Starting a new cloud agent…"
+    });
+
+    return {
+      ...(await startFirstRun({
+        apiKey,
+        repoUrl,
+        branch,
+        promptText,
+        sdkImages,
+        send
+      })),
+      agent: null,
+      streamAssistantText: true as const,
+      streamThinking: true as const
+    };
+  }
+
+  send("agent", { agentId: agent.agentId });
+
+  const agentMessage =
+    sdkImages.length > 0
+      ? { text: promptText, images: sdkImages }
+      : promptText;
+
+  const run = await agent.send(agentMessage, {
+    onDelta: ({ update }) => {
+      if (update.type === "text-delta" && update.text) {
+        send("text", { delta: update.text });
+        return;
+      }
+
+      if (update.type === "thinking-delta" && update.text) {
+        send("thinking", { delta: update.text });
+      }
+    }
+  });
+
+  return {
+    agentId: agent.agentId,
+    run,
+    agent,
+    streamAssistantText: false as const,
+    streamThinking: false as const
+  };
+}
 
 export async function POST(request: Request) {
   const tooLarge = bodyTooLargeResponse(request, MAX_CHAT_BODY_BYTES);
@@ -79,14 +264,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const wrappedPrompt = wrapUserPrompt(prompt || "What's in this image?", {
-    repoUrl,
-    branch
-  });
-  const agentMessage =
-    sdkImages.length > 0
-      ? { text: wrappedPrompt, images: sdkImages }
-      : wrappedPrompt;
+  const promptText = buildUserPrompt(prompt || defaultImagePrompt());
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -95,88 +273,34 @@ export async function POST(request: Request) {
         controller.enqueue(encoder.encode(formatSseEvent(event, data)));
       };
 
-      let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
+      let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
 
       try {
-        if (agentId) {
-          try {
-            agent = await Agent.resume(agentId, {
-              apiKey,
-              model: { id: CURSOR_MODEL }
-            });
-          } catch (resumeError) {
-            if (!(resumeError instanceof CursorAgentError)) {
-              throw resumeError;
-            }
-
-            send("status", {
-              message: "Previous agent unavailable. Starting a new cloud agent…"
-            });
-
-            agent = await Agent.create({
-              apiKey,
-              model: { id: CURSOR_MODEL },
-              cloud: {
-                repos: [{ url: repoUrl, startingRef: branch }],
-                skipReviewerRequest: true
-              }
-            });
-          }
-        } else {
-          agent = await Agent.create({
-            apiKey,
-            model: { id: CURSOR_MODEL },
-            cloud: {
-              repos: [{ url: repoUrl, startingRef: branch }],
-              skipReviewerRequest: true
-            }
-          });
-        }
-
-        send("agent", { agentId: agent.agentId });
         send("status", { message: "Starting Cursor cloud agent…" });
 
-        const run = await agent.send(agentMessage, {
-          onDelta: ({ update }) => {
-            if (update.type === "text-delta" && update.text) {
-              send("text", { delta: update.text });
-              return;
-            }
+        const runContext: StreamRunContext = {
+          apiKey,
+          repoUrl,
+          branch,
+          promptText,
+          sdkImages,
+          agentId,
+          send
+        };
 
-            if (update.type === "thinking-delta" && update.text) {
-              send("thinking", { delta: update.text });
-            }
-          }
+        const started = agentId
+          ? await startFollowUpRun(runContext)
+          : await startFirstRun(runContext);
+
+        disposableAgent = "agent" in started ? started.agent : null;
+        const resolvedAgentId = started.agentId;
+
+        await streamRun(started.run, send, {
+          streamAssistantText: started.streamAssistantText,
+          streamThinking: started.streamThinking
         });
 
-        for await (const event of run.stream()) {
-          if (event.type === "tool_call") {
-            send("tool", { name: event.name, status: event.status });
-
-            if (event.status === "completed") {
-              for (const path of extractSourcePaths(
-                event.name,
-                event.args,
-                event.result
-              )) {
-                send("source", { path });
-              }
-            }
-
-            continue;
-          }
-
-          if (event.type === "thinking" && event.text) {
-            send("thinking", { delta: event.text });
-            continue;
-          }
-
-          if (event.type === "status" && event.message) {
-            send("status", { message: event.message });
-          }
-        }
-
-        const result = await run.wait();
+        const result = await started.run.wait();
 
         if (result.status === "error") {
           send("error", {
@@ -196,9 +320,9 @@ export async function POST(request: Request) {
 
         let thinking: string | undefined;
 
-        if (run.supports("conversation")) {
+        if (started.run.supports("conversation")) {
           try {
-            const turns = await run.conversation();
+            const turns = await started.run.conversation();
             thinking = extractThinkingFromConversation(turns);
           } catch {
             // Fall back to whatever thinking streamed during the run.
@@ -206,7 +330,7 @@ export async function POST(request: Request) {
         }
 
         send("done", {
-          agentId: agent.agentId,
+          agentId: resolvedAgentId,
           runId: result.id,
           status: result.status,
           result: result.result,
@@ -221,10 +345,15 @@ export async function POST(request: Request) {
           return;
         }
 
-        send("error", { message: "Failed to run the Cursor agent." });
+        send("error", {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to run the Cursor agent."
+        });
       } finally {
-        if (agent) {
-          await agent[Symbol.asyncDispose]();
+        if (disposableAgent) {
+          await disposableAgent[Symbol.asyncDispose]();
         }
         controller.close();
       }
