@@ -1,6 +1,6 @@
-# Codebase Chat
+# AskCursor
 
-Codebase Chat is a Next.js app for asking questions about your repositories in plain language. Each user brings their own [Cursor API key](https://cursor.com/dashboard/integrations), picks a connected GitHub repo, and chats with a Cursor cloud agent that reads the codebase and answers for non-engineers.
+[AskCursor](https://askcursor.app) is a Next.js app for asking questions about your repositories in plain language. Each user brings their own [Cursor API key](https://cursor.com/dashboard/integrations), picks a connected GitHub repo, and chats with a Cursor cloud agent that reads the codebase and answers for non-engineers.
 
 ## Features
 
@@ -66,7 +66,7 @@ The server is a stateless proxy: it uses the caller's API key for each request a
 
 ## Read-only enforcement
 
-Codebase Chat uses three layers:
+AskCursor uses three layers:
 
 1. **System prompt** (`lib/system-prompt.ts`) — instructs read-only investigation and explanation
 2. **Repo hooks** — add `.cursor/hooks.json` in the **target repository** for hard enforcement. See [`docs/hooks.example.json`](docs/hooks.example.json).
@@ -113,7 +113,8 @@ Deploy like any Next.js app (for example on Vercel). No server secrets are requi
 1. Push the repository to GitHub.
 2. Import the project in your hosting provider.
 3. Deploy with default Next.js settings.
-4. Users connect by pasting their own Cursor API key at runtime.
+4. Point [askcursor.app](https://askcursor.app) at your deployment.
+5. Users connect by pasting their own Cursor API key at runtime.
 
 Usage is billed to each user's Cursor account through normal cloud agent consumption.
 

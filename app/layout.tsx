@@ -2,9 +2,17 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Codebase Chat",
+  metadataBase: new URL("https://askcursor.app"),
+  title: "AskCursor",
   description:
-    "Ask questions about your codebase in plain language with your own Cursor API key.",
+    "Ask questions about any repository in plain language with your own Cursor API key.",
+  openGraph: {
+    title: "AskCursor",
+    description:
+      "Ask questions about any repository in plain language with your own Cursor API key.",
+    url: "https://askcursor.app",
+    siteName: "AskCursor"
+  },
   icons: {
     icon: "/favicon.svg"
   }
