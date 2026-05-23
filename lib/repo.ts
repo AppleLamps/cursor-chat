@@ -11,6 +11,21 @@ export function repoLabel(repoUrl: string) {
   }
 }
 
+export function filterRepos(repos: RepoOption[], query: string) {
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized) {
+    return repos;
+  }
+
+  return repos.filter((repo) => {
+    const label = repoLabel(repo.url).toLowerCase();
+    return (
+      label.includes(normalized) || repo.url.toLowerCase().includes(normalized)
+    );
+  });
+}
+
 export async function fetchRepositories(apiKey: string) {
   const response = await fetch("/api/repos", {
     method: "POST",

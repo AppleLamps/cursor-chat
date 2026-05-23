@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, RefObject, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  ReactNode,
+  RefObject,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Onboarding from "@/components/Onboarding";
@@ -1376,7 +1384,7 @@ function SidebarPanel({
       </div>
 
       <div className="mt-4 space-y-1">
-        <SidebarButton label="New chat" icon="✎" onClick={onNewChat} />
+        <SidebarButton label="New chat" icon={<IconEdit />} onClick={onNewChat} />
       </div>
 
       <div className="mt-6 px-2 text-xs font-semibold text-[#6b6b6b]">
@@ -1410,7 +1418,7 @@ function SidebarPanel({
                   aria-label={`Rename ${conversation.title}`}
                   title="Rename"
                 >
-                  ✎
+                  <IconEdit className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => onDeleteConversation(conversation.id)}
@@ -1426,53 +1434,63 @@ function SidebarPanel({
         )}
       </div>
 
-      <div className="mt-auto border-t border-[#ececec] px-2 pt-3">
-        <div className="rounded-lg px-2 py-2">
+      <div className="mt-auto border-t border-[#ececec] pt-3">
+        <div className="rounded-xl border border-[#ececec] bg-[#fafafa] p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#8a8a8a]">
             Settings
           </p>
 
-          <div className="mt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#8a8a8a]">
-              Cursor API key
-            </p>
-            <p
-              className="mt-1 truncate font-mono text-xs text-[#444]"
-              title="Connected API key"
-            >
-              {maskApiKey(apiKey)}
-            </p>
-            <button
-              type="button"
-              onClick={onSignOut}
-              className="mt-2 w-full rounded-lg px-2 py-2 text-left text-sm text-[#444] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-            >
-              Clear saved key
-            </button>
-          </div>
-
           {defaultRepoLabel ? (
-            <div className="mt-4 border-t border-[#ececec] pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#8a8a8a]">
-                Default repository
-              </p>
-              <p
-                className="mt-1 truncate text-xs text-[#444]"
-                title={defaultRepoLabel}
-              >
-                {defaultRepoLabel}
-              </p>
+            <div className="mt-3">
+              <div className="flex items-start gap-2.5">
+                <SidebarIcon>
+                  <IconFolder />
+                </SidebarIcon>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-[#8a8a8a]">Default repository</p>
+                  <p
+                    className="mt-0.5 truncate text-sm text-[#303030]"
+                    title={defaultRepoLabel}
+                  >
+                    {defaultRepoLabel}
+                  </p>
+                </div>
+              </div>
               {onChangeDefaultRepo ? (
-                <button
-                  type="button"
+                <SettingsAction
+                  label="New chat in another repo"
+                  icon={<IconSwitch />}
                   onClick={onChangeDefaultRepo}
-                  className="mt-2 w-full rounded-lg px-2 py-2 text-left text-sm text-[#444] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-                >
-                  New chat in another repo
-                </button>
+                />
               ) : null}
             </div>
           ) : null}
+
+          <div
+            className={
+              defaultRepoLabel ? "mt-3 border-t border-[#ececec] pt-3" : "mt-3"
+            }
+          >
+            <div className="flex items-start gap-2.5">
+              <SidebarIcon>
+                <IconKey />
+              </SidebarIcon>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-[#8a8a8a]">Cursor API key</p>
+                <p
+                  className="mt-0.5 truncate font-mono text-sm text-[#303030]"
+                  title="Connected API key"
+                >
+                  {maskApiKey(apiKey)}
+                </p>
+              </div>
+            </div>
+            <SettingsAction
+              label="Clear saved key"
+              icon={<IconKeyOff />}
+              onClick={onSignOut}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1493,13 +1511,44 @@ function BrandBlock() {
   );
 }
 
+function SidebarIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-[#555]">
+      {children}
+    </span>
+  );
+}
+
+function SettingsAction({
+  label,
+  icon,
+  onClick
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#444] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#777]">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function SidebarButton({
   label,
   icon,
   onClick
 }: {
   label: string;
-  icon: string;
+  icon: ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -1507,11 +1556,104 @@ function SidebarButton({
       onClick={onClick}
       className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-[#303030] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
     >
-      <span className="flex h-5 w-5 items-center justify-center text-sm text-[#555]">
-        {icon}
-      </span>
+      <SidebarIcon>{icon}</SidebarIcon>
       <span>{label}</span>
     </button>
+  );
+}
+
+function IconEdit({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function IconFolder({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </svg>
+  );
+}
+
+function IconKey({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="15" r="4" />
+      <path d="m10.5 12.5 7-7" />
+      <path d="m18 5 1 1" />
+      <path d="m15 8 1 1" />
+    </svg>
+  );
+}
+
+function IconKeyOff({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m2 2 20 20" />
+      <path d="M6.5 6.5A4 4 0 0 0 5 10v4a2 2 0 0 0 2 2h2" />
+      <path d="M10.5 10.5 18 18" />
+      <path d="M18 10v4a2 2 0 0 1-2 2h-2" />
+    </svg>
+  );
+}
+
+function IconSwitch({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M16 3h5v5" />
+      <path d="M8 21H3v-5" />
+      <path d="M21 3 14 10" />
+      <path d="M3 21l7-7" />
+    </svg>
   );
 }
 
@@ -1616,12 +1758,12 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
           Questions are answered from the repository selected in the header,
           with sources you can verify.
         </p>
-        <div className="mx-auto mt-8 grid max-w-3xl gap-2 sm:grid-cols-2">
+        <div className="mx-auto mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2 sm:items-start">
           {SUGGESTED_PROMPTS.map((prompt) => (
             <button
               key={prompt}
               onClick={() => onPick(prompt)}
-              className="rounded-2xl border border-[#e5e5e5] bg-white p-4 text-left text-sm leading-6 text-[#5f6368] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+              className="rounded-2xl border border-[#e5e5e5] bg-white px-4 py-3 text-left text-sm leading-6 text-[#5f6368] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
             >
               {prompt}
             </button>
