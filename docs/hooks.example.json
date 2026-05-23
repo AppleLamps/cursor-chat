@@ -1,0 +1,16 @@
+{
+  "$comment": "Copy to .cursor/hooks.json in the repository users query (not this app repo). Blocks destructive shell/git mutations. MCP is allowed by default — tighten beforeMCPExecution if needed.",
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "node -e \"const input=require('fs').readFileSync(0,'utf8')); const payload=JSON.parse(input); const cmd=(payload.command||'').toLowerCase(); const blocked=[/\\brm\\b/,/\\bmv\\b/,/\\bcp\\b/,/\\bgit\\s+(commit|push|reset|checkout|apply|rebase|merge|cherry-pick)\\b/,/\\b(npm|pnpm|yarn|bun)\\s+(install|publish)\\b/,/>\\s*[^\\s]/]; if(blocked.some((rule)=>rule.test(cmd))){console.error(JSON.stringify({permission:'deny',user_message:'Codebase Chat is read-only. Shell mutations are blocked.',agent_message:'This environment is read-only. Do not run destructive shell commands or modify git state.'})); process.exit(0);} console.log(JSON.stringify({permission:'allow'}));\""
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "node -e \"console.log(JSON.stringify({permission:'allow'}));\""
+      }
+    ]
+  }
+}

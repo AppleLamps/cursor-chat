@@ -1,0 +1,231 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,650&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Manrope";
+  --font-display: "Newsreader";
+  --background: #fbfaf7;
+  --foreground: #16181d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--foreground);
+  background: #ffffff;
+  font-family: var(--font-sans), sans-serif;
+}
+
+::selection {
+  color: #ffffff;
+  background: #2458d3;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scrollbar-soft {
+  scrollbar-width: thin;
+  scrollbar-color: #d5cbbd transparent;
+}
+
+.scrollbar-soft::-webkit-scrollbar {
+  width: 10px;
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  background: #d5cbbd;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.message-content {
+  overflow-wrap: anywhere;
+}
+
+.message-content > *:first-child {
+  margin-top: 0;
+}
+
+.message-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.message-content p {
+  margin: 0 0 0.85rem;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 1.15rem 0 0.55rem;
+  color: inherit;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.message-content h1 {
+  font-size: 1.55rem;
+}
+
+.message-content h2 {
+  font-size: 1.32rem;
+}
+
+.message-content h3 {
+  font-size: 1.12rem;
+}
+
+.message-content h4 {
+  font-size: 1rem;
+}
+
+.message-content strong {
+  font-weight: 800;
+}
+
+.message-content em {
+  font-style: italic;
+}
+
+.message-content a {
+  color: #2458d3;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.message-content-user a {
+  color: #ffffff;
+}
+
+.message-content ul,
+.message-content ol {
+  margin: 0.6rem 0 0.95rem 1.35rem;
+  padding: 0;
+}
+
+.message-content ul {
+  list-style: disc;
+}
+
+.message-content ol {
+  list-style: decimal;
+}
+
+.message-content li {
+  margin: 0.32rem 0;
+  padding-left: 0.15rem;
+}
+
+.message-content li > p {
+  margin: 0.25rem 0;
+}
+
+.message-content blockquote {
+  margin: 1rem 0;
+  border-left: 3px solid #d9d9d9;
+  padding-left: 1rem;
+  color: #555;
+}
+
+.message-content-user blockquote {
+  border-left-color: rgba(255, 255, 255, 0.42);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.message-content hr {
+  margin: 1.25rem 0;
+  border: 0;
+  border-top: 1px solid #e5e5e5;
+}
+
+.message-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.message-content th,
+.message-content td {
+  border: 1px solid #e5e5e5;
+  padding: 0.58rem 0.72rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-content th {
+  background: #f7f7f8;
+  font-weight: 800;
+}
+
+.message-content-user th,
+.message-content-user td {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.message-content-user th {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.message-content code {
+  border: 1px solid rgba(13, 13, 13, 0.10);
+  border-radius: 0.42rem;
+  background: #f7f7f8;
+  padding: 0.08rem 0.34rem;
+  font-size: 0.9em;
+}
+
+.message-content-user code {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.message-content pre {
+  overflow: auto;
+  border: 1px solid rgba(13, 13, 13, 0.10);
+  border-radius: 0.875rem;
+  background: #f7f7f8;
+  color: #16181d;
+  margin: 1rem 0;
+  padding: 1rem;
+}
+
+.message-content pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.9rem;
+}
+
+.message-content-user pre {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
