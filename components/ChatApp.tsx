@@ -5,7 +5,9 @@ import {
   KeyboardEvent,
   ReactNode,
   RefObject,
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -977,7 +979,7 @@ export default function ChatApp() {
     void sendMessage(lastUserMessage, true);
   }
 
-  async function copyMessage(message: Message) {
+  const copyMessage = useCallback(async (message: Message) => {
     try {
       await copyText(message.content);
       setCopiedMessageId(message.id);
@@ -985,7 +987,36 @@ export default function ChatApp() {
     } catch {
       setError("Could not copy that message.");
     }
-  }
+  }, []);
+
+  const handleCopyMessage = useCallback(
+    (message: Message) => {
+      void copyMessage(message);
+    },
+    [copyMessage]
+  );
+
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((message) => (
+        <MessageBubble
+          key={message.id}
+          message={message}
+          repoUrl={activeConversation?.repoUrl}
+          branch={activeConversation?.branch || DEFAULT_BRANCH}
+          copied={copiedMessageId === message.id}
+          onCopy={() => handleCopyMessage(message)}
+          onRetry={() => retryAssistantMessage(message.id)}
+        />
+      )),
+    [
+      activeConversation?.branch,
+      activeConversation?.repoUrl,
+      copiedMessageId,
+      handleCopyMessage,
+      messages
+    ]
+  );
 
   function retryAssistantMessage(messageId: string) {
     const messageIndex = messages.findIndex((message) => message.id === messageId);
@@ -1457,17 +1488,7 @@ export default function ChatApp() {
               />
             ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-7">
-                {messages.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    repoUrl={activeConversation?.repoUrl}
-                    branch={activeConversation?.branch || DEFAULT_BRANCH}
-                    copied={copiedMessageId === message.id}
-                    onCopy={() => void copyMessage(message)}
-                    onRetry={() => retryAssistantMessage(message.id)}
-                  />
-                ))}
+                {renderedMessages}
               </div>
             )}
           </div>
