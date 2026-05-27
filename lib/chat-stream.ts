@@ -2,6 +2,7 @@ import { parseSseBuffer, toolActivityLabel } from "@/lib/sse";
 
 export type ChatStreamDone = {
   agentId: string;
+  agentSessionToken?: string;
   runId: string;
   status: string;
   result?: string;
@@ -10,7 +11,7 @@ export type ChatStreamDone = {
 };
 
 export type ChatStreamHandlers = {
-  onAgent?: (agentId: string) => void;
+  onAgent?: (agentId: string, agentSessionToken?: string) => void;
   onText?: (delta: string) => void;
   onThinking?: (payload: { delta?: string; text?: string }) => void;
   onActivity?: (activity: string) => void;
@@ -44,7 +45,12 @@ export async function consumeChatStream(
         case "agent": {
           const agentId = data.agentId;
           if (typeof agentId === "string") {
-            handlers.onAgent?.(agentId);
+            handlers.onAgent?.(
+              agentId,
+              typeof data.agentSessionToken === "string"
+                ? data.agentSessionToken
+                : undefined
+            );
           }
           break;
         }
@@ -105,6 +111,10 @@ export async function consumeChatStream(
               agentId,
               runId,
               status,
+              agentSessionToken:
+                typeof data.agentSessionToken === "string"
+                  ? data.agentSessionToken
+                  : undefined,
               result: typeof data.result === "string" ? data.result : undefined,
               thinking: typeof data.thinking === "string" ? data.thinking : undefined,
               prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined

@@ -19,6 +19,11 @@ import {
   checkRateLimit,
   rateLimitedResponse
 } from "@/lib/rate-limit";
+import {
+  createAgentSessionToken,
+  verifyAgentSessionToken
+} from "@/lib/agent-session";
+import { validateAgentPolicy } from "@/lib/agent-policy";
 import { extractSourcePaths } from "@/lib/sources";
 import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
@@ -29,7 +34,9 @@ type ChatRequest = {
   repoUrl?: string;
   branch?: string;
   agentId?: string;
+  agentSessionToken?: string;
   agentMode?: AgentMode;
+  implementConfirmed?: boolean;
   images?: Array<{ url?: string; mimeType?: string }>;
 };
 
@@ -49,6 +56,7 @@ type StreamRunContext = {
   promptText: string;
   sdkImages: ReturnType<typeof chatImagesToSdk>;
   agentId?: string;
+  agentSessionToken?: string;
   send: (event: ChatStreamEventName, data: Record<string, unknown>) => void;
 };
 
@@ -143,7 +151,14 @@ async function startFirstRun({
   send
 }: Omit<StreamRunContext, "agentId">) {
   const agent = await createCloudAgent(apiKey, repoUrl, branch, agentMode);
-  send("agent", { agentId: agent.agentId });
+  const agentSessionToken = createAgentSessionToken({
+    agentId: agent.agentId,
+    apiKey,
+    repoUrl,
+    branch,
+    agentMode
+  });
+  send("agent", { agentId: agent.agentId, agentSessionToken });
 
   let streamedTextLength = 0;
   const agentMessage = buildFirstAgentMessage(
@@ -160,7 +175,13 @@ async function startFirstRun({
     })
   });
 
-  return { agentId: agent.agentId, run, agent, streamedTextLength };
+  return {
+    agentId: agent.agentId,
+    agentSessionToken,
+    run,
+    agent,
+    streamedTextLength
+  };
 }
 
 async function startFollowUpRun({
@@ -200,7 +221,14 @@ async function startFollowUpRun({
     });
   }
 
-  send("agent", { agentId: agent.agentId });
+  const agentSessionToken = createAgentSessionToken({
+    agentId: agent.agentId,
+    apiKey,
+    repoUrl,
+    branch,
+    agentMode
+  });
+  send("agent", { agentId: agent.agentId, agentSessionToken });
 
   let streamedTextLength = 0;
   const agentMessage =
@@ -216,7 +244,13 @@ async function startFollowUpRun({
     })
   });
 
-  return { agentId: agent.agentId, run, agent, streamedTextLength };
+  return {
+    agentId: agent.agentId,
+    agentSessionToken,
+    run,
+    agent,
+    streamedTextLength
+  };
 }
 
 export async function POST(request: Request) {
@@ -245,6 +279,7 @@ export async function POST(request: Request) {
   const repoUrl = body.repoUrl?.trim();
   const branch = body.branch?.trim() || DEFAULT_BRANCH;
   const agentId = body.agentId?.trim();
+  const agentSessionToken = body.agentSessionToken?.trim();
 
   if (!apiKey) {
     return NextResponse.json({ error: "API key is required." }, { status: 400 });
@@ -252,6 +287,38 @@ export async function POST(request: Request) {
 
   if (!repoUrl) {
     return NextResponse.json({ error: "Repository URL is required." }, { status: 400 });
+  }
+
+  const policy = validateAgentPolicy({
+    agentMode,
+    repoUrl,
+    branch,
+    isFollowUp: Boolean(agentId),
+    implementConfirmed: body.implementConfirmed === true
+  });
+
+  if (!policy.allowed) {
+    return NextResponse.json({ error: policy.error }, { status: policy.status });
+  }
+
+  if (agentId) {
+    const session = verifyAgentSessionToken(agentSessionToken, {
+      agentId,
+      apiKey,
+      repoUrl,
+      branch,
+      agentMode
+    });
+
+    if (!session.valid) {
+      return NextResponse.json(
+        {
+          error:
+            "This agent session is no longer valid for the selected repository, branch, and mode. Start a new chat to continue."
+        },
+        { status: 409 }
+      );
+    }
   }
 
   const sdkImages = chatImagesToSdk(parseChatImages(body.images));
@@ -291,6 +358,7 @@ export async function POST(request: Request) {
           promptText,
           sdkImages,
           agentId,
+          agentSessionToken,
           send
         };
 
@@ -300,6 +368,7 @@ export async function POST(request: Request) {
 
         disposableAgent = started.agent;
         const resolvedAgentId = started.agentId;
+        const resolvedAgentSessionToken = started.agentSessionToken;
 
         await streamRunEvents(started.run, send);
 
@@ -339,6 +408,7 @@ export async function POST(request: Request) {
 
         send("done", {
           agentId: resolvedAgentId,
+          agentSessionToken: resolvedAgentSessionToken,
           runId: result.id,
           status: result.status,
           result: finalResult,

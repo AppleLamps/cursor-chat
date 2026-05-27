@@ -92,6 +92,7 @@ type Conversation = {
   repoUrl?: string;
   branch?: string;
   agentId?: string;
+  agentSessionToken?: string;
   agentMode?: AgentMode;
 };
 
@@ -714,6 +715,7 @@ export default function ChatApp() {
                 repoUrl,
                 branch,
                 agentId: undefined,
+                agentSessionToken: undefined,
                 updatedAt: new Date().toISOString()
               }
             : conversation
@@ -806,7 +808,8 @@ export default function ChatApp() {
   function persistConversation(
     conversationId: string,
     nextMessages: Message[],
-    nextAgentId?: string | null
+    nextAgentId?: string | null,
+    nextAgentSessionToken?: string | null
   ) {
     if (nextMessages.length === 0) return;
 
@@ -832,6 +835,10 @@ export default function ChatApp() {
         branch: existing.branch,
         agentId:
           nextAgentId === null ? undefined : nextAgentId ?? existing.agentId,
+        agentSessionToken:
+          nextAgentId === null
+            ? undefined
+            : nextAgentSessionToken ?? existing.agentSessionToken,
         agentMode: resolveConversationAgentMode(existing)
       };
 
@@ -846,9 +853,15 @@ export default function ChatApp() {
 
   function persistActiveConversation(
     nextMessages: Message[],
-    nextAgentId?: string | null
+    nextAgentId?: string | null,
+    nextAgentSessionToken?: string | null
   ) {
-    persistConversation(activeConversationId, nextMessages, nextAgentId);
+    persistConversation(
+      activeConversationId,
+      nextMessages,
+      nextAgentId,
+      nextAgentSessionToken
+    );
   }
 
   function openConversation(conversation: Conversation) {
@@ -899,6 +912,7 @@ export default function ChatApp() {
                 ...conversation,
                 agentMode: mode,
                 agentId: undefined,
+                agentSessionToken: undefined,
                 updatedAt: now
               }
             : conversation
@@ -983,6 +997,7 @@ export default function ChatApp() {
     const conversationRepoUrl = activeConversation.repoUrl;
     const conversationBranch = activeConversation.branch || DEFAULT_BRANCH;
     const conversationAgentId = activeConversation.agentId;
+    const conversationAgentSessionToken = activeConversation.agentSessionToken;
     const conversationAgentMode = activeAgentMode;
 
     if (pdfsForMessage.length > 0) {
@@ -993,6 +1008,19 @@ export default function ChatApp() {
     if (imagesForMessage.length > MAX_CHAT_IMAGES) {
       setError(`You can attach up to ${MAX_CHAT_IMAGES} images per message.`);
       return;
+    }
+
+    let implementConfirmed = false;
+
+    if (isImplementMode(conversationAgentMode) && !conversationAgentId) {
+      implementConfirmed = window.confirm(
+        `Run Implement mode on ${repoLabel(conversationRepoUrl)} (${conversationBranch})?\n\nThe Cursor agent may edit files, commit changes, open a pull request, and use your Cursor account.`
+      );
+
+      if (!implementConfirmed) {
+        setComposerNote("Implement mode cancelled before starting.");
+        return;
+      }
     }
 
     setError(null);
@@ -1029,6 +1057,7 @@ export default function ChatApp() {
     let assistantSources: string[] = [];
     let assistantPrUrl: string | undefined;
     let resolvedAgentId = conversationAgentId;
+    let resolvedAgentSessionToken = conversationAgentSessionToken;
     const streamingAssistant: Message = {
       id: assistantId,
       role: "assistant",
@@ -1069,7 +1098,9 @@ export default function ChatApp() {
           repoUrl: conversationRepoUrl,
           branch: conversationBranch,
           agentId: conversationAgentId,
+          agentSessionToken: conversationAgentSessionToken,
           agentMode: conversationAgentMode,
+          implementConfirmed,
           images: imagesForMessage.map((image) => ({
             url: image.url,
             mimeType: image.mimeType
@@ -1089,8 +1120,11 @@ export default function ChatApp() {
       }
 
       await consumeChatStream(response, {
-        onAgent: (agentIdFromStream) => {
+        onAgent: (agentIdFromStream, agentSessionTokenFromStream) => {
           resolvedAgentId = agentIdFromStream;
+          if (agentSessionTokenFromStream) {
+            resolvedAgentSessionToken = agentSessionTokenFromStream;
+          }
         },
         onText: (delta) => {
           assistantContent += delta;
@@ -1116,6 +1150,9 @@ export default function ChatApp() {
         },
         onDone: (payload) => {
           resolvedAgentId = payload.agentId;
+          if (payload.agentSessionToken) {
+            resolvedAgentSessionToken = payload.agentSessionToken;
+          }
           if (payload.result?.trim()) {
             assistantContent = payload.result.trim();
             streamBuffer.setContent(assistantContent);
@@ -1150,7 +1187,12 @@ export default function ChatApp() {
       };
       const finalMessages = [...optimisticMessages, assistantMessage];
       replaceMessagesForConversation(conversationId, finalMessages);
-      persistConversation(conversationId, finalMessages, resolvedAgentId);
+      persistConversation(
+        conversationId,
+        finalMessages,
+        resolvedAgentId,
+        resolvedAgentSessionToken
+      );
       if (activeConversationIdRef.current === conversationId) {
         setComposerNote(
           assistantPrUrl
@@ -1176,7 +1218,7 @@ export default function ChatApp() {
         setError(message);
       }
       replaceMessagesForConversation(conversationId, finalMessages);
-      persistConversation(conversationId, finalMessages, null);
+      persistConversation(conversationId, finalMessages, null, null);
     } finally {
       setIsSending(false);
       inputRef.current?.focus();

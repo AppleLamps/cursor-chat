@@ -65,12 +65,12 @@ npm run start
 4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
 5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:
    - `agent`, `status`, `text`, `thinking`, `tool`, `source`, `done`, `error`
-6. **First message** in a conversation: `Agent.create()` then `agent.send()` with the mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
+6. **First message** in a conversation: the server validates mode policy, then `Agent.create()` and `agent.send()` run with the mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
    - **Ask mode:** read-only prompt; `skipReviewerRequest: true`
    - **Implement mode:** implementation prompt; `autoCreatePR: true`
 7. **Follow-up messages**: `Agent.resume()` then `agent.send()` with plain user text only — the system prompt is not repeated.
 8. The `done` event may include `prUrl` when Implement mode opens a pull request.
-9. Each conversation stores a Cursor `agentId` so follow-ups keep agent context.
+9. Each conversation stores a Cursor `agentId` plus a signed server-issued session token so follow-ups keep agent context only for the same API key, repo, branch, and mode.
 10. If resume fails (expired agent), the server starts a fresh cloud agent automatically.
 
 The server is a stateless proxy: it uses the caller's API key for each request and does not persist keys.
@@ -84,12 +84,19 @@ The server is a stateless proxy: it uses the caller's API key for each request a
 
 Implement mode requires write access to the target repo through the user's Cursor GitHub integration. Organization policies may block cloud agent pushes.
 
+Server-side guardrails in `lib/agent-policy.ts` make Implement mode a privileged path:
+
+- Fresh Implement runs require explicit user confirmation in the UI and `implementConfirmed: true` at the API boundary.
+- Protected branches are blocked by default: `main`, `master`, `prod`, `production`, `release`, `release/*`, and `hotfix/*`.
+- Deployments can disable Implement mode or restrict it by owner, repo, and branch with the `ASKCURSOR_IMPLEMENT_*` environment variables documented in `.env.example`.
+- Follow-up runs must present the signed `agentSessionToken` issued with the original `agentId`; mismatched repo, branch, mode, or API key starts are rejected.
+
 ## Read-only enforcement (Ask mode)
 
 Ask mode uses two active layers plus a future SDK option:
 
 1. **System prompt** (`lib/system-prompt.ts`) — sent on the **first message only** via `buildFirstAgentMessage()`. It instructs read-only investigation, depth-matched answers, an investigation playbook (README → search → tests → trace), backtick file citations, image/screenshot handling, and an engineering handoff sentence when users ask for code changes.
-2. **Repo hooks** — add `.cursor/hooks.json` in the **target repository** for hard enforcement. See [`docs/hooks.example.json`](docs/hooks.example.json).
+2. **Repo hooks** — add `.cursor/hooks.json` in the **target repository** for hard enforcement. See [`docs/hooks.example.json`](docs/hooks.example.json). Production deployments should require these hooks for repositories that are used in Ask mode, because prompt instructions alone are not a hard security boundary.
 
 The example hooks block destructive shell commands and git mutations. MCP tools are still allowed — tighten `beforeMCPExecution` in the target repo if needed.
 
@@ -103,7 +110,7 @@ Implement mode expects the target repository **not** to use the read-only hooks 
 
 - API keys are sent from the browser to this app's server on repo load and chat requests, then forwarded to Cursor. They are not stored server-side.
 - Optional "remember on this device" stores the key in `localStorage`, which is readable by any script on the page (standard XSS risk).
-- **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account.
+- **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account. It is server-gated by confirmation, signed agent sessions, optional allowlists, and protected-branch blocking.
 - **Rate limiting:** in-memory per-IP limits on `/api/chat` (12/min Ask, 6/min Implement), `/api/repos` (30/min), and `/api/branches` (60/min). Chat requests allow up to ~20 MB bodies (for image attachments); other API routes use a smaller default cap.
 - Ensure hosting logs do not capture request bodies containing API keys.
 
