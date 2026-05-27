@@ -73,6 +73,7 @@ type ImageAttachment = {
   name: string;
   mimeType: string;
   url: string;
+  storageKey?: string;
 };
 
 type PdfAttachment = {
@@ -136,6 +137,8 @@ type SpeechRecognitionWindow = Window & {
 const exampleTitle = APP_NAME;
 const STORAGE_KEY = STORAGE_KEYS.CONVERSATIONS;
 const SIDEBAR_STORAGE_KEY = STORAGE_KEYS.SIDEBAR;
+const ATTACHMENT_DB_NAME = "codebase-chat-attachments-v1";
+const ATTACHMENT_DB_STORE = "image-data-urls";
 const MAX_TEXT_ATTACHMENT_CHARS = 500_000;
 const MAX_IMAGE_DATA_URL_CHARS = 850_000;
 const IMAGE_MAX_DIMENSION = 1400;
@@ -207,6 +210,141 @@ function createConversation(
 function sortConversations(conversations: Conversation[]) {
   return [...conversations].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+}
+
+let attachmentDbPromise: Promise<IDBDatabase> | null = null;
+
+function openAttachmentDb() {
+  if (!("indexedDB" in window)) {
+    return Promise.reject(new Error("IndexedDB is not available."));
+  }
+
+  attachmentDbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
+    const request = window.indexedDB.open(ATTACHMENT_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(ATTACHMENT_DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () =>
+      reject(request.error || new Error("Could not open attachment storage."));
+  });
+
+  return attachmentDbPromise;
+}
+
+async function writeStoredImage(key: string, dataUrl: string) {
+  const db = await openAttachmentDb();
+
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(ATTACHMENT_DB_STORE, "readwrite");
+    const store = transaction.objectStore(ATTACHMENT_DB_STORE);
+    store.put(dataUrl, key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error || new Error("Could not save image attachment."));
+  });
+}
+
+async function readStoredImage(key: string) {
+  const db = await openAttachmentDb();
+
+  return new Promise<string | null>((resolve, reject) => {
+    const transaction = db.transaction(ATTACHMENT_DB_STORE, "readonly");
+    const request = transaction.objectStore(ATTACHMENT_DB_STORE).get(key);
+    request.onsuccess = () =>
+      resolve(typeof request.result === "string" ? request.result : null);
+    request.onerror = () =>
+      reject(request.error || new Error("Could not load image attachment."));
+  });
+}
+
+async function pruneStoredImages(activeKeys: Set<string>) {
+  const db = await openAttachmentDb();
+
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(ATTACHMENT_DB_STORE, "readwrite");
+    const store = transaction.objectStore(ATTACHMENT_DB_STORE);
+    const request = store.getAllKeys();
+
+    request.onsuccess = () => {
+      for (const key of request.result) {
+        if (typeof key === "string" && !activeKeys.has(key)) {
+          store.delete(key);
+        }
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error || new Error("Could not clean image storage."));
+  });
+}
+
+function imageStorageKey(image: ImageAttachment) {
+  return image.storageKey || `image:${image.id}`;
+}
+
+async function serializeConversationsForStorage(conversations: Conversation[]) {
+  const activeImageKeys = new Set<string>();
+  const imageWrites: Promise<void>[] = [];
+
+  const serialized = conversations.map((conversation) => ({
+    ...conversation,
+    messages: conversation.messages.map((message) => ({
+      ...message,
+      imageAttachments: message.imageAttachments?.map((image) => {
+        if (!image.url.startsWith("data:")) {
+          if (image.storageKey) activeImageKeys.add(image.storageKey);
+          return image;
+        }
+
+        const storageKey = imageStorageKey(image);
+        activeImageKeys.add(storageKey);
+        imageWrites.push(
+          writeStoredImage(storageKey, image.url).catch(() => undefined)
+        );
+
+        return {
+          ...image,
+          storageKey,
+          url: ""
+        };
+      })
+    }))
+  }));
+
+  await Promise.all(imageWrites);
+
+  return { conversations: serialized, activeImageKeys };
+}
+
+async function hydrateConversationsFromStorage(conversations: Conversation[]) {
+  return Promise.all(
+    conversations.map(async (conversation) => ({
+      ...conversation,
+      messages: await Promise.all(
+        conversation.messages.map(async (message) => ({
+          ...message,
+          imageAttachments: message.imageAttachments
+            ? await Promise.all(
+                message.imageAttachments.map(async (image) => {
+                  if (!image.storageKey || image.url.startsWith("data:")) {
+                    return image;
+                  }
+
+                  try {
+                    const storedUrl = await readStoredImage(image.storageKey);
+                    return storedUrl ? { ...image, url: storedUrl } : image;
+                  } catch {
+                    return image;
+                  }
+                })
+              )
+            : undefined
+        }))
+      )
+    }))
   );
 }
 
@@ -398,6 +536,8 @@ export default function ChatApp() {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const voiceBaseInputRef = useRef("");
   const seededDefaultConversationRef = useRef(false);
+  const activeConversationIdRef = useRef(activeConversationId);
+  const conversationPersistenceRunRef = useRef(0);
 
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeConversationId
@@ -424,52 +564,89 @@ export default function ChatApp() {
   const lastAssistantErrored = messages[messages.length - 1]?.error === true;
 
   useEffect(() => {
-    setApiKey(getStoredApiKey());
-    setGithubToken(getStoredGitHubToken());
-    setHasAuthHydrated(true);
-  }, []);
+    let cancelled = false;
 
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      const storedSidebar = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
-      const parsed = stored ? (JSON.parse(stored) as unknown) : [];
-      const saved = Array.isArray(parsed)
-        ? sortConversations(
-            parsed
-              .filter(isConversation)
-              .map(stripPrivateConversationFields)
-              .map(normalizeConversation)
-          )
-        : [];
+    async function hydrateHistory() {
+      try {
+        const stored = window.localStorage.getItem(STORAGE_KEY);
+        const storedSidebar = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        const parsed = stored ? (JSON.parse(stored) as unknown) : [];
+        const saved = Array.isArray(parsed)
+          ? sortConversations(
+              await hydrateConversationsFromStorage(
+                parsed
+                  .filter(isConversation)
+                  .map(stripPrivateConversationFields)
+                  .map(normalizeConversation)
+              )
+            )
+          : [];
 
-      if (storedSidebar) {
-        setSidebarOpen(storedSidebar !== "collapsed");
+        if (cancelled) return;
+
+        if (storedSidebar) {
+          setSidebarOpen(storedSidebar !== "collapsed");
+        }
+
+        if (saved.length > 0) {
+          const latest = saved[0];
+          setConversations(saved);
+          setCurrentActiveConversationId(latest.id);
+          setMessages(latest.messages);
+          setLastUserMessage(
+            [...latest.messages].reverse().find((message) => message.role === "user")
+              ?.content || null
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          // Corrupt local storage should never block the chat UI.
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+      } finally {
+        if (!cancelled) setHasHydrated(true);
       }
-
-      if (saved.length > 0) {
-        const latest = saved[0];
-        setConversations(saved);
-        setActiveConversationId(latest.id);
-        setMessages(latest.messages);
-        setLastUserMessage(
-          [...latest.messages].reverse().find((message) => message.role === "user")
-            ?.content || null
-        );
-      }
-    } catch {
-      // Corrupt local storage should never block the chat UI.
-      window.localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setHasHydrated(true);
     }
+
+    void hydrateHistory();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!hasHydrated) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+
+    const run = conversationPersistenceRunRef.current + 1;
+    conversationPersistenceRunRef.current = run;
+
+    void (async () => {
+      try {
+        const {
+          conversations: serializedConversations,
+          activeImageKeys
+        } = await serializeConversationsForStorage(conversations);
+
+        if (conversationPersistenceRunRef.current !== run) return;
+
+        window.localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(serializedConversations)
+        );
+        void pruneStoredImages(activeImageKeys).catch(() => undefined);
+      } catch {
+        if (conversationPersistenceRunRef.current === run) {
+          setError("Could not save chat history in this browser.");
+        }
+      }
+    })();
   }, [conversations, hasHydrated]);
 
+  /*
+   * Kept below as a plain sidebar preference because it is tiny and does not
+   * participate in conversation history persistence.
+   */
   useEffect(() => {
     if (!hasHydrated) return;
     window.localStorage.setItem(
@@ -501,9 +678,15 @@ export default function ChatApp() {
       getDefaultAgentMode()
     );
     setConversations([conversation]);
-    setActiveConversationId(conversation.id);
+    setCurrentActiveConversationId(conversation.id);
     setMessages([]);
   }, [hasHydrated, apiKey, conversations.length]);
+
+  useEffect(() => {
+    setApiKey(getStoredApiKey());
+    setGithubToken(getStoredGitHubToken());
+    setHasAuthHydrated(true);
+  }, []);
 
   async function loadRepositories(key: string) {
     setReposLoading(true);
@@ -546,7 +729,7 @@ export default function ChatApp() {
         ...current.filter((item) => item.id !== conversation.id)
       ])
     );
-    setActiveConversationId(conversation.id);
+    setCurrentActiveConversationId(conversation.id);
     setMessages([]);
     setInput("");
     setPendingImages([]);
@@ -599,7 +782,29 @@ export default function ChatApp() {
     };
   }, []);
 
-  function persistActiveConversation(
+  function setCurrentActiveConversationId(id: string) {
+    activeConversationIdRef.current = id;
+    setActiveConversationId(id);
+  }
+
+  function replaceMessagesForConversation(
+    conversationId: string,
+    nextMessages: Message[]
+  ) {
+    if (activeConversationIdRef.current !== conversationId) return;
+    setMessages(nextMessages);
+  }
+
+  function updateMessagesForConversation(
+    conversationId: string,
+    updater: (currentMessages: Message[]) => Message[]
+  ) {
+    if (activeConversationIdRef.current !== conversationId) return;
+    setMessages(updater);
+  }
+
+  function persistConversation(
+    conversationId: string,
     nextMessages: Message[],
     nextAgentId?: string | null
   ) {
@@ -608,37 +813,46 @@ export default function ChatApp() {
     const now = new Date().toISOString();
     setConversations((current) => {
       const existing = current.find(
-        (conversation) => conversation.id === activeConversationId
+        (conversation) => conversation.id === conversationId
       );
+      if (!existing) return current;
+
       const title =
         existing?.manualTitle && existing.title
           ? existing.title
           : titleFromMessages(nextMessages);
       const nextConversation: Conversation = {
-        id: activeConversationId,
+        id: conversationId,
         title,
-        createdAt: existing?.createdAt || now,
+        createdAt: existing.createdAt,
         updatedAt: now,
         messages: nextMessages,
-        manualTitle: existing?.manualTitle,
-        repoUrl: existing?.repoUrl,
-        branch: existing?.branch,
+        manualTitle: existing.manualTitle,
+        repoUrl: existing.repoUrl,
+        branch: existing.branch,
         agentId:
-          nextAgentId === null ? undefined : nextAgentId ?? existing?.agentId,
+          nextAgentId === null ? undefined : nextAgentId ?? existing.agentId,
         agentMode: resolveConversationAgentMode(existing)
       };
 
       return sortConversations([
         nextConversation,
         ...current.filter(
-          (conversation) => conversation.id !== activeConversationId
+          (conversation) => conversation.id !== conversationId
         )
       ]);
     });
   }
 
+  function persistActiveConversation(
+    nextMessages: Message[],
+    nextAgentId?: string | null
+  ) {
+    persistConversation(activeConversationId, nextMessages, nextAgentId);
+  }
+
   function openConversation(conversation: Conversation) {
-    setActiveConversationId(conversation.id);
+    setCurrentActiveConversationId(conversation.id);
     setMessages(conversation.messages);
     setInput("");
     setPendingImages([]);
@@ -765,6 +979,12 @@ export default function ChatApp() {
       return;
     }
 
+    const conversationId = activeConversation.id;
+    const conversationRepoUrl = activeConversation.repoUrl;
+    const conversationBranch = activeConversation.branch || DEFAULT_BRANCH;
+    const conversationAgentId = activeConversation.agentId;
+    const conversationAgentMode = activeAgentMode;
+
     if (pdfsForMessage.length > 0) {
       setError("PDF attachments are not supported. Use images or text.");
       return;
@@ -793,8 +1013,8 @@ export default function ChatApp() {
     const cleanMessages = baseMessages.filter((message) => !message.error);
     const optimisticMessages = retry ? cleanMessages : [...cleanMessages, userMessage];
 
-    setMessages(optimisticMessages);
-    persistActiveConversation(optimisticMessages);
+    replaceMessagesForConversation(conversationId, optimisticMessages);
+    persistConversation(conversationId, optimisticMessages);
 
     if (!retry) {
       setInput("");
@@ -808,7 +1028,7 @@ export default function ChatApp() {
     let assistantActivity = "Starting Cursor cloud agent…";
     let assistantSources: string[] = [];
     let assistantPrUrl: string | undefined;
-    let resolvedAgentId = activeConversation.agentId;
+    let resolvedAgentId = conversationAgentId;
     const streamingAssistant: Message = {
       id: assistantId,
       role: "assistant",
@@ -818,10 +1038,13 @@ export default function ChatApp() {
       activity: assistantActivity
     };
 
-    setMessages([...optimisticMessages, streamingAssistant]);
+    replaceMessagesForConversation(conversationId, [
+      ...optimisticMessages,
+      streamingAssistant
+    ]);
 
     const streamBuffer = createStreamBuffer(50, (snapshot) => {
-      setMessages((current) =>
+      updateMessagesForConversation(conversationId, (current) =>
         current.map((message) =>
           message.id === assistantId
             ? {
@@ -831,7 +1054,7 @@ export default function ChatApp() {
                 activity: snapshot.activity || undefined
               }
             : message
-        )
+          )
       );
     });
     streamBuffer.setActivity(assistantActivity);
@@ -843,10 +1066,10 @@ export default function ChatApp() {
         body: JSON.stringify({
           apiKey,
           prompt: messageContent,
-          repoUrl: activeConversation.repoUrl,
-          branch: activeConversation.branch || DEFAULT_BRANCH,
-          agentId: activeConversation.agentId,
-          agentMode: activeAgentMode,
+          repoUrl: conversationRepoUrl,
+          branch: conversationBranch,
+          agentId: conversationAgentId,
+          agentMode: conversationAgentMode,
           images: imagesForMessage.map((image) => ({
             url: image.url,
             mimeType: image.mimeType
@@ -883,7 +1106,7 @@ export default function ChatApp() {
         },
         onSource: (path) => {
           assistantSources = uniqueSortedSources([...assistantSources, path]);
-          setMessages((current) =>
+          updateMessagesForConversation(conversationId, (current) =>
             current.map((message) =>
               message.id === assistantId
                 ? { ...message, sources: assistantSources }
@@ -926,15 +1149,17 @@ export default function ChatApp() {
         prUrl: assistantPrUrl
       };
       const finalMessages = [...optimisticMessages, assistantMessage];
-      setMessages(finalMessages);
-      persistActiveConversation(finalMessages, resolvedAgentId);
-      setComposerNote(
-        assistantPrUrl
-          ? "Changes submitted. Pull request link is in the answer."
-          : isImplementMode(activeAgentMode)
-            ? "Task completed by Cursor cloud agent."
-            : "Answer generated by Cursor cloud agent."
-      );
+      replaceMessagesForConversation(conversationId, finalMessages);
+      persistConversation(conversationId, finalMessages, resolvedAgentId);
+      if (activeConversationIdRef.current === conversationId) {
+        setComposerNote(
+          assistantPrUrl
+            ? "Changes submitted. Pull request link is in the answer."
+            : isImplementMode(conversationAgentMode)
+              ? "Task completed by Cursor cloud agent."
+              : "Answer generated by Cursor cloud agent."
+        );
+      }
     } catch (caught) {
       const message =
         caught instanceof Error ? caught.message : "Something went wrong.";
@@ -947,9 +1172,11 @@ export default function ChatApp() {
         streaming: false
       };
       const finalMessages = [...optimisticMessages, errorMessage];
-      setError(message);
-      setMessages(finalMessages);
-      persistActiveConversation(finalMessages, null);
+      if (activeConversationIdRef.current === conversationId) {
+        setError(message);
+      }
+      replaceMessagesForConversation(conversationId, finalMessages);
+      persistConversation(conversationId, finalMessages, null);
     } finally {
       setIsSending(false);
       inputRef.current?.focus();
