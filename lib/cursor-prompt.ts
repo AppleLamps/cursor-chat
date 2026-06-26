@@ -1,6 +1,8 @@
 import type { AgentMode } from "@/lib/defaults";
 import { DEFAULT_AGENT_MODE } from "@/lib/defaults";
+import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { IMPLEMENT_SYSTEM_PROMPT } from "@/lib/implement-prompt";
+import { PLAN_SYSTEM_PROMPT } from "@/lib/plan-prompt";
 import { CODEBASE_SYSTEM_PROMPT } from "@/lib/system-prompt";
 import type { SDKImage } from "@cursor/sdk";
 
@@ -11,11 +13,15 @@ type PromptContext = {
 };
 
 function systemPromptForMode(mode: AgentMode) {
-  return mode === "implement" ? IMPLEMENT_SYSTEM_PROMPT : CODEBASE_SYSTEM_PROMPT;
+  if (isImplementMode(mode)) return IMPLEMENT_SYSTEM_PROMPT;
+  if (isPlanMode(mode)) return PLAN_SYSTEM_PROMPT;
+  return CODEBASE_SYSTEM_PROMPT;
 }
 
 function userMessageLabelForMode(mode: AgentMode) {
-  return mode === "implement" ? "User task:" : "User question:";
+  if (isImplementMode(mode)) return "User task:";
+  if (isPlanMode(mode)) return "User planning request:";
+  return "User question:";
 }
 
 export function buildAgentInstructions(context?: PromptContext) {

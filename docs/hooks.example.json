@@ -1,5 +1,5 @@
 {
-  "$comment": "Copy to .cursor/hooks.json in the repository users query (not this app repo). Blocks destructive shell/git mutations. MCP is allowed by default — tighten beforeMCPExecution if needed.",
+  "$comment": "Copy to .cursor/hooks.json in repositories used with AskCursor Ask or Plan mode (not this app repo). Blocks destructive shell/git mutations. MCP is allowed by default — tighten beforeMCPExecution if needed.",
   "version": 1,
   "hooks": {
     "beforeShellExecution": [

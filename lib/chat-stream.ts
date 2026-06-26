@@ -1,4 +1,6 @@
 import { parseSseBuffer, toolActivityLabel } from "@/lib/sse";
+import { normalizeTokenUsage } from "@/lib/chat-telemetry";
+import type { ChatTokenUsage } from "@/lib/chat-types";
 
 export type ChatStreamDone = {
   agentId: string;
@@ -8,7 +10,38 @@ export type ChatStreamDone = {
   result?: string;
   thinking?: string;
   prUrl?: string;
+  requestId?: string;
+  usage?: ChatTokenUsage;
+  durationMs?: number;
+  modelId?: string;
 };
+
+export class ChatStreamError extends Error {
+  readonly runId?: string;
+  readonly requestId?: string;
+  readonly code?: string;
+  readonly status?: number;
+  readonly retryable?: boolean;
+
+  constructor(
+    message: string,
+    metadata: {
+      runId?: string;
+      requestId?: string;
+      code?: string;
+      status?: number;
+      retryable?: boolean;
+    } = {}
+  ) {
+    super(message);
+    this.name = "ChatStreamError";
+    this.runId = metadata.runId;
+    this.requestId = metadata.requestId;
+    this.code = metadata.code;
+    this.status = metadata.status;
+    this.retryable = metadata.retryable;
+  }
+}
 
 export type ChatStreamHandlers = {
   onAgent?: (agentId: string, agentSessionToken?: string) => void;
@@ -117,15 +150,30 @@ export async function consumeChatStream(
                   : undefined,
               result: typeof data.result === "string" ? data.result : undefined,
               thinking: typeof data.thinking === "string" ? data.thinking : undefined,
-              prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined
+              prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined,
+              requestId:
+                typeof data.requestId === "string" ? data.requestId : undefined,
+              usage: normalizeTokenUsage(data.usage),
+              durationMs:
+                typeof data.durationMs === "number" ? data.durationMs : undefined,
+              modelId: typeof data.model === "string" ? data.model : undefined
             });
           }
           break;
         }
         case "error": {
           const message = data.message;
-          throw new Error(
-            typeof message === "string" ? message : "The chat stream failed."
+          throw new ChatStreamError(
+            typeof message === "string" ? message : "The chat stream failed.",
+            {
+              runId: typeof data.runId === "string" ? data.runId : undefined,
+              requestId:
+                typeof data.requestId === "string" ? data.requestId : undefined,
+              code: typeof data.code === "string" ? data.code : undefined,
+              status: typeof data.status === "number" ? data.status : undefined,
+              retryable:
+                typeof data.retryable === "boolean" ? data.retryable : undefined
+            }
           );
         }
         default:

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "@/components/BranchPicker";
-import { isImplementMode } from "@/lib/agent-mode";
+import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { APP_NAME, DEFAULT_AGENT_MODE, DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
 import { RepoOption, filterRepos, repoLabel } from "@/lib/repo";
 
@@ -58,7 +58,9 @@ export default function RepoPicker({
     description ??
     (isImplementMode(agentMode)
       ? "Pick the codebase the agent should modify. It may commit changes and open a pull request."
-      : "Pick the codebase this conversation should answer questions about.");
+      : isPlanMode(agentMode)
+        ? "Pick the codebase the agent should inspect before producing a read-only implementation plan."
+        : "Pick the codebase this conversation should answer questions about.");
 
   const filteredRepos = useMemo(
     () => filterRepos(repos, searchQuery),
@@ -213,12 +215,18 @@ export default function RepoPicker({
           {allowModeSelection ? (
             <fieldset className="mt-5">
               <legend className="text-sm font-medium text-[#333]">Chat mode</legend>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <ModeOption
                   selected={agentMode === "qa"}
                   title="Ask"
                   description="Read-only answers about the codebase"
                   onSelect={() => setAgentMode("qa")}
+                />
+                <ModeOption
+                  selected={agentMode === "plan"}
+                  title="Plan"
+                  description="Read-only implementation plan"
+                  onSelect={() => setAgentMode("plan")}
                 />
                 <ModeOption
                   selected={agentMode === "implement"}

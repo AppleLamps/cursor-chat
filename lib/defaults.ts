@@ -1,6 +1,6 @@
 export const APP_NAME = "AskCursor";
 
-export type AgentMode = "qa" | "implement";
+export type AgentMode = "qa" | "plan" | "implement";
 
 export const DEFAULT_AGENT_MODE: AgentMode = "qa";
 
@@ -23,6 +23,15 @@ export const SUGGESTED_PROMPTS = [
   "What frameworks and libraries are used?",
   "How does data flow through the app?",
   "Where should a new developer start?"
+];
+
+export const SUGGESTED_PLAN_PROMPTS = [
+  "Make a plan to add this feature safely",
+  "Identify the files and tests this change would touch",
+  "Find risks and edge cases before implementation",
+  "Plan a refactor for this area without changing behavior",
+  "Outline a rollout and verification checklist",
+  "Compare possible approaches for this change"
 ];
 
 export const SUGGESTED_IMPLEMENT_PROMPTS = [

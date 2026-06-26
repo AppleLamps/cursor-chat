@@ -1,7 +1,11 @@
-import { Agent, CursorAgentError } from "@cursor/sdk";
+import { Agent, AgentNotFoundError, CursorAgentError } from "@cursor/sdk";
 import type { Run, RunResult } from "@cursor/sdk";
 import { NextResponse } from "next/server";
-import { isImplementMode, parseAgentMode } from "@/lib/agent-mode";
+import {
+  isImplementMode,
+  parseAgentMode,
+  sdkModeForAgentMode
+} from "@/lib/agent-mode";
 import {
   buildFirstAgentMessage,
   buildUserPrompt,
@@ -30,6 +34,7 @@ import { extractSourcePaths } from "@/lib/sources";
 import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
 import { validateBranch, validateRepoUrl } from "@/lib/validate";
+import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 
 type ChatRequest = {
   apiKey?: string;
@@ -67,6 +72,11 @@ type StreamCallbacks = {
   onTextDelta?: (delta: string) => void;
 };
 
+type RunTelemetry = {
+  requestId?: string;
+  usage?: ReturnType<typeof normalizeTokenUsage>;
+};
+
 function createStreamCallbacks(
   send: StreamRunContext["send"],
   callbacks: StreamCallbacks
@@ -90,10 +100,21 @@ async function streamRunEvents(
   run: Run,
   send: StreamRunContext["send"],
   options?: { streamThinking?: boolean }
-) {
+): Promise<RunTelemetry> {
   const streamThinking = options?.streamThinking ?? false;
+  const telemetry: RunTelemetry = {};
 
   for await (const event of run.stream()) {
+    if (event.type === "request") {
+      telemetry.requestId = event.request_id;
+      continue;
+    }
+
+    if (event.type === "usage") {
+      telemetry.usage = normalizeTokenUsage(event.usage) ?? telemetry.usage;
+      continue;
+    }
+
     if (event.type === "tool_call") {
       send("tool", { name: event.name, status: event.status });
 
@@ -119,10 +140,55 @@ async function streamRunEvents(
       send("status", { message: event.message });
     }
   }
+
+  return telemetry;
 }
 
 function extractPrUrl(result: RunResult): string | undefined {
   return result.git?.branches?.find((branch) => branch.prUrl)?.prUrl;
+}
+
+function modelIdFromResult(result: RunResult, run: Run) {
+  return result.model?.id ?? run.model?.id;
+}
+
+function requestIdFrom(error: CursorAgentError, run?: Run | null) {
+  return error.requestId ?? run?.requestId;
+}
+
+function logCursorFailure({
+  error,
+  agentId,
+  run,
+  runId,
+  requestId,
+  agentMode,
+  repoUrl,
+  branch
+}: {
+  error: CursorAgentError | Error | string;
+  agentId?: string;
+  run?: Run | null;
+  runId?: string;
+  requestId?: string;
+  agentMode: AgentMode;
+  repoUrl: string;
+  branch: string;
+}) {
+  const sdkError = error instanceof CursorAgentError ? error : null;
+
+  console.error("Cursor agent run failed", {
+    agentId: agentId ?? run?.agentId,
+    runId: runId ?? run?.id,
+    requestId: requestId ?? (sdkError ? requestIdFrom(sdkError, run) : run?.requestId),
+    agentMode,
+    repoUrl,
+    branch,
+    message: typeof error === "string" ? error : error.message,
+    code: sdkError?.code,
+    status: sdkError?.status,
+    retryable: sdkError?.isRetryable
+  });
 }
 
 async function createCloudAgent(
@@ -138,6 +204,7 @@ async function createCloudAgent(
   return Agent.create({
     apiKey,
     model: { id: CURSOR_MODEL },
+    mode: sdkModeForAgentMode(agentMode),
     cloud: isImplementMode(agentMode)
       ? { ...cloudBase, autoCreatePR: true }
       : { ...cloudBase, skipReviewerRequest: true }
@@ -171,6 +238,7 @@ async function startFirstRun({
   );
 
   const run = await agent.send(agentMessage, {
+    mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
         streamedTextLength += delta.length;
@@ -202,26 +270,31 @@ async function startFollowUpRun({
   try {
     agent = await Agent.resume(agentId!, {
       apiKey,
-      model: { id: CURSOR_MODEL }
+      model: { id: CURSOR_MODEL },
+      mode: sdkModeForAgentMode(agentMode)
     });
   } catch (resumeError) {
+    if (resumeError instanceof AgentNotFoundError) {
+      send("status", {
+        message: "Previous agent unavailable. Starting a new cloud agent..."
+      });
+
+      return startFirstRun({
+        apiKey,
+        repoUrl,
+        branch,
+        agentMode,
+        promptText,
+        sdkImages,
+        send
+      });
+    }
+
     if (!(resumeError instanceof CursorAgentError)) {
       throw resumeError;
     }
 
-    send("status", {
-      message: "Previous agent unavailable. Starting a new cloud agent…"
-    });
-
-    return startFirstRun({
-      apiKey,
-      repoUrl,
-      branch,
-      agentMode,
-      promptText,
-      sdkImages,
-      send
-    });
+    throw resumeError;
   }
 
   const agentSessionToken = createAgentSessionToken({
@@ -240,6 +313,7 @@ async function startFollowUpRun({
       : promptText;
 
   const run = await agent.send(agentMessage, {
+    mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
         streamedTextLength += delta.length;
@@ -368,9 +442,11 @@ export async function POST(request: Request) {
       };
 
       let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
+      let currentRun: Run | null = null;
+      let resolvedAgentIdForLog = agentId;
 
       try {
-        send("status", { message: "Starting Cursor cloud agent…" });
+        send("status", { message: "Starting Cursor cloud agent..." });
 
         const runContext: StreamRunContext = {
           apiKey,
@@ -391,23 +467,51 @@ export async function POST(request: Request) {
         disposableAgent = started.agent;
         const resolvedAgentId = started.agentId;
         const resolvedAgentSessionToken = started.agentSessionToken;
+        resolvedAgentIdForLog = resolvedAgentId;
+        currentRun = started.run;
 
-        await streamRunEvents(started.run, send);
+        const streamTelemetry = await streamRunEvents(started.run, send);
 
         const result = await started.run.wait();
+        const requestId =
+          result.requestId ?? streamTelemetry.requestId ?? started.run.requestId;
+        const usage =
+          normalizeTokenUsage(result.usage) ?? streamTelemetry.usage;
 
         if (result.status === "error") {
+          logCursorFailure({
+            error: "The Cursor agent run failed before finishing.",
+            agentId: resolvedAgentId,
+            run: started.run,
+            runId: result.id,
+            requestId,
+            agentMode,
+            repoUrl,
+            branch
+          });
           send("error", {
             message: "The Cursor agent run failed before finishing.",
-            runId: result.id
+            runId: result.id,
+            requestId
           });
           return;
         }
 
         if (result.status === "cancelled") {
+          logCursorFailure({
+            error: "The Cursor agent run was cancelled.",
+            agentId: resolvedAgentId,
+            run: started.run,
+            runId: result.id,
+            requestId,
+            agentMode,
+            repoUrl,
+            branch
+          });
           send("error", {
             message: "The Cursor agent run was cancelled.",
-            runId: result.id
+            runId: result.id,
+            requestId
           });
           return;
         }
@@ -435,17 +539,46 @@ export async function POST(request: Request) {
           status: result.status,
           result: finalResult,
           thinking,
-          prUrl: extractPrUrl(result)
+          prUrl: extractPrUrl(result),
+          requestId,
+          usage,
+          durationMs: result.durationMs ?? started.run.durationMs,
+          model: modelIdFromResult(result, started.run)
         });
       } catch (error) {
         if (error instanceof CursorAgentError) {
+          const requestId = requestIdFrom(error, currentRun);
+          logCursorFailure({
+            error,
+            agentId: resolvedAgentIdForLog,
+            run: currentRun,
+            requestId,
+            agentMode,
+            repoUrl,
+            branch
+          });
           send("error", {
             message: error.message,
-            retryable: error.isRetryable
+            retryable: error.isRetryable,
+            code: error.code,
+            status: error.status,
+            requestId,
+            runId: currentRun?.id
           });
           return;
         }
 
+        logCursorFailure({
+          error:
+            error instanceof Error
+              ? error
+              : "Failed to run the Cursor agent.",
+          agentId: resolvedAgentIdForLog,
+          run: currentRun,
+          agentMode,
+          repoUrl,
+          branch
+        });
         send("error", {
           message:
             error instanceof Error
