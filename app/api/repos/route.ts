@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   bodyTooLargeResponse,
   checkRateLimit,
+  limiterUnavailableResponse,
   rateLimitedResponse
 } from "@/lib/rate-limit";
 
@@ -14,8 +15,12 @@ export async function POST(request: Request) {
   const tooLarge = bodyTooLargeResponse(request);
   if (tooLarge) return tooLarge;
 
-  const rateLimit = checkRateLimit("repos", request);
+  const rateLimit = await checkRateLimit("repos", request);
   if (!rateLimit.allowed) {
+    if (rateLimit.unavailable) {
+      return limiterUnavailableResponse();
+    }
+
     return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 

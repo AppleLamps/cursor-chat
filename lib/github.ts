@@ -1,30 +1,21 @@
+import { validateRepoUrl } from "@/lib/validate";
+
 export type GitHubRepoRef = {
   owner: string;
   repo: string;
 };
 
 export function parseGitHubRepoUrl(repoUrl: string): GitHubRepoRef | null {
-  try {
-    const url = new URL(repoUrl.trim());
-    const host = url.hostname.toLowerCase();
+  const validation = validateRepoUrl(repoUrl);
 
-    if (host !== "github.com" && host !== "www.github.com") {
-      return null;
-    }
-
-    const parts = url.pathname.replace(/^\/+|\/+$/g, "").split("/");
-
-    if (parts.length < 2 || !parts[0] || !parts[1]) {
-      return null;
-    }
-
-    return {
-      owner: parts[0],
-      repo: parts[1].replace(/\.git$/i, "")
-    };
-  } catch {
+  if (!validation.ok) {
     return null;
   }
+
+  return {
+    owner: validation.value.owner,
+    repo: validation.value.repo
+  };
 }
 
 type GitHubRepoResponse = {

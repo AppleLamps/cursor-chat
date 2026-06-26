@@ -3,6 +3,7 @@ import { listGitHubBranches } from "@/lib/github";
 import {
   bodyTooLargeResponse,
   checkRateLimit,
+  limiterUnavailableResponse,
   rateLimitedResponse
 } from "@/lib/rate-limit";
 
@@ -15,8 +16,12 @@ export async function POST(request: Request) {
   const tooLarge = bodyTooLargeResponse(request);
   if (tooLarge) return tooLarge;
 
-  const rateLimit = checkRateLimit("branches", request);
+  const rateLimit = await checkRateLimit("branches", request);
   if (!rateLimit.allowed) {
+    if (rateLimit.unavailable) {
+      return limiterUnavailableResponse();
+    }
+
     return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 

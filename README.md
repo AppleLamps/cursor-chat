@@ -9,7 +9,7 @@
 - Repository picker backed by `Cursor.repositories.list()` with per-conversation branch selection
 - **Ask mode** (default): read-only Q&A for non-engineers
 - **Implement mode** (optional): scoped code changes with automatic pull request creation via `autoCreatePR`
-- Cursor cloud agents via `@cursor/sdk@1.0.13` (`Agent.create` / `Agent.resume`)
+- Cursor cloud agents via `@cursor/sdk@1.0.22` (`Agent.create` / `Agent.resume`)
 - Streaming answers over SSE with live tool activity and collapsible **Thinking** panel
 - Markdown responses with styled code blocks, one-click copy, and **View pull request** links when a PR is opened
 - Image attachments (PNG, JPEG, WebP, GIF — file upload or public URL, up to 5 per message)
@@ -27,19 +27,28 @@
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22.13 or newer
 - npm
 - A Cursor account with GitHub repos connected for cloud agents
 
 ## Environment Variables
 
-No server-side API keys are required. Users enter their own Cursor API key in the UI.
+No server-side Cursor API key is required. Users enter their own Cursor API key in the UI.
+
+Production deployments must also configure durable request controls and a stable
+agent-session signing secret:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+- `ASKCURSOR_AGENT_SESSION_SECRET`
+- `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS` (optional, defaults to `50`)
 
 ```bash
 cp .env.example .env.local
 ```
 
-The `.env.example` file documents the BYOK model. You do not need secrets for local development.
+The `.env.example` file documents the BYOK model. You do not need these secrets
+for local development; local dev falls back to in-memory request controls.
 
 ## Development
 
@@ -104,14 +113,16 @@ The example hooks block destructive shell commands and git mutations. MCP tools 
 
 Implement mode expects the target repository **not** to use the read-only hooks profile. Optionally add [`docs/hooks.implement.example.json`](docs/hooks.implement.example.json) for a lighter safety net that still allows git commit/push.
 
-**Not used for either mode:** Cursor's Cloud Agents REST API documents `mode: "plan"`, but `@cursor/sdk@1.0.13` does not expose it. When the SDK adds a native `instructions` or system field, prefer that over embedding the prompt in the first user message.
+**Not used for either mode:** `@cursor/sdk@1.0.22` exposes an agent conversation `mode` option (`"agent"` or `"plan"`), but this app still uses its own **Ask** and **Implement** product modes plus first-message instructions. Revisit this mapping before wiring SDK plan mode into Ask mode.
 
 ## Security notes
 
 - API keys are sent from the browser to this app's server on repo load and chat requests, then forwarded to Cursor. They are not stored server-side.
 - Optional "remember on this device" stores the key in `localStorage`, which is readable by any script on the page (standard XSS risk).
 - **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account. It is server-gated by confirmation, signed agent sessions, optional allowlists, and protected-branch blocking.
-- **Rate limiting:** in-memory per-IP limits on `/api/chat` (12/min Ask, 6/min Implement), `/api/repos` (30/min), and `/api/branches` (60/min). Chat requests allow up to ~20 MB bodies (for image attachments); other API routes use a smaller default cap.
+- **Rate limiting:** durable Redis-backed limits on `/api/chat` (12/min Ask, 6/min Implement), `/api/repos` (30/min), and `/api/branches` (60/min). Chat also limits by Cursor API key hash and caps active streams with `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS`. In production, missing or unavailable Redis request controls fail closed with `503`.
+- **Session signing:** production requires `ASKCURSOR_AGENT_SESSION_SECRET` (or `AUTH_SECRET` / `NEXTAUTH_SECRET`) so signed agent resume tokens survive deploys and cold starts.
+- **Repository input:** chat requests only accept normalized `https://github.com/{owner}/{repo}` URLs and valid Git branch/ref names before calling the Cursor SDK.
 - Ensure hosting logs do not capture request bodies containing API keys.
 
 ## Project Structure
@@ -150,11 +161,13 @@ docs/
 
 ## Deployment
 
-Deploy like any Next.js app (for example on Vercel). No server secrets are required.
+Deploy like any Next.js app (for example on Vercel). No server-side Cursor API
+key is required, but production request controls and session signing need
+environment variables.
 
 1. Push the repository to GitHub.
 2. Import the project in your hosting provider.
-3. Deploy with default Next.js settings.
+3. Configure `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and `ASKCURSOR_AGENT_SESSION_SECRET`.
 4. Point [askcursor.app](https://askcursor.app) at your deployment.
 5. Users connect by pasting their own Cursor API key at runtime.
 

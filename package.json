@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,8 @@
     "start": "next start"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.13",
+    "@cursor/sdk": "^1.0.22",
+    "@upstash/redis": "^1.38.0",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",

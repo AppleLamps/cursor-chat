@@ -17,6 +17,8 @@ import {
 import {
   bodyTooLargeResponse,
   checkRateLimit,
+  claimChatConcurrencySlot,
+  limiterUnavailableResponse,
   rateLimitedResponse
 } from "@/lib/rate-limit";
 import {
@@ -27,6 +29,7 @@ import { validateAgentPolicy } from "@/lib/agent-policy";
 import { extractSourcePaths } from "@/lib/sources";
 import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
+import { validateBranch, validateRepoUrl } from "@/lib/validate";
 
 type ChatRequest = {
   apiKey?: string;
@@ -265,28 +268,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
   }
 
+  const apiKey = body.apiKey?.trim();
   const agentMode = parseAgentMode(body.agentMode);
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
     isImplementMode(agentMode) ? "chatImplement" : "chat",
-    request
+    request,
+    { apiKey }
   );
   if (!rateLimit.allowed) {
+    if (rateLimit.unavailable) {
+      return limiterUnavailableResponse();
+    }
+
     return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 
-  const apiKey = body.apiKey?.trim();
   const prompt = body.prompt?.trim();
-  const repoUrl = body.repoUrl?.trim();
-  const branch = body.branch?.trim() || DEFAULT_BRANCH;
+  const repoValidation = validateRepoUrl(body.repoUrl);
+  if (!repoValidation.ok) {
+    return NextResponse.json({ error: repoValidation.error }, { status: 400 });
+  }
+
+  const branchValidation = validateBranch(body.branch?.trim() || DEFAULT_BRANCH);
+  if (!branchValidation.ok) {
+    return NextResponse.json({ error: branchValidation.error }, { status: 400 });
+  }
+
+  const repoUrl = repoValidation.value.url;
+  const branch = branchValidation.value;
   const agentId = body.agentId?.trim();
   const agentSessionToken = body.agentSessionToken?.trim();
 
   if (!apiKey) {
     return NextResponse.json({ error: "API key is required." }, { status: 400 });
-  }
-
-  if (!repoUrl) {
-    return NextResponse.json({ error: "Repository URL is required." }, { status: 400 });
   }
 
   const policy = validateAgentPolicy({
@@ -337,6 +351,14 @@ export async function POST(request: Request) {
   }
 
   const promptText = buildUserPrompt(prompt || defaultImagePrompt());
+  const concurrencySlot = await claimChatConcurrencySlot();
+  if (!concurrencySlot.allowed) {
+    if (concurrencySlot.unavailable) {
+      return limiterUnavailableResponse();
+    }
+
+    return rateLimitedResponse(concurrencySlot.retryAfterSeconds);
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -434,6 +456,7 @@ export async function POST(request: Request) {
         if (disposableAgent) {
           await disposableAgent[Symbol.asyncDispose]();
         }
+        await concurrencySlot.release();
         controller.close();
       }
     }

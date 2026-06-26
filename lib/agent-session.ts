@@ -1,11 +1,19 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AgentMode } from "@/lib/defaults";
 
-const SIGNING_SECRET =
+const CONFIGURED_SIGNING_SECRET =
   process.env.ASKCURSOR_AGENT_SESSION_SECRET ||
   process.env.AUTH_SECRET ||
-  process.env.NEXTAUTH_SECRET ||
-  randomBytes(32).toString("hex");
+  process.env.NEXTAUTH_SECRET;
+
+if (!CONFIGURED_SIGNING_SECRET?.trim() && process.env.NODE_ENV === "production") {
+  throw new Error(
+    "ASKCURSOR_AGENT_SESSION_SECRET, AUTH_SECRET, or NEXTAUTH_SECRET must be set in production."
+  );
+}
+
+const SIGNING_SECRET =
+  CONFIGURED_SIGNING_SECRET?.trim() || randomBytes(32).toString("hex");
 
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
