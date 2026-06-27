@@ -43,3 +43,4 @@ Thumbs.db
 
 # Cursor / local tooling
 .cursor/
+.codegraph/

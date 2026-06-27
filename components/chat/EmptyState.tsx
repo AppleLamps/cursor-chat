@@ -8,6 +8,7 @@ import {
   type AgentMode
 } from "@/lib/defaults";
 import ModeToggle from "@/components/chat/ModeToggle";
+import { Button } from "@/components/ui/button";
 
 export default function EmptyState({
   agentMode,
@@ -25,17 +26,19 @@ export default function EmptyState({
       : SUGGESTED_PROMPTS;
 
   return (
-    <div className="mx-auto flex min-h-full max-w-4xl items-center justify-center">
+    <div className="mx-auto flex min-h-full max-w-4xl items-start justify-center pt-6 sm:items-center sm:pt-0">
       <div className="w-full py-10 text-center sm:py-16">
-        <ModeToggle agentMode={agentMode} onChange={onAgentModeChange} />
-        <h2 className="mt-6 text-2xl font-medium tracking-tight text-[#202123] sm:text-[28px]">
+        <div className="hidden sm:block">
+          <ModeToggle agentMode={agentMode} onChange={onAgentModeChange} />
+        </div>
+        <h2 className="text-2xl font-medium tracking-tight text-foreground sm:mt-6 sm:text-[28px]">
           {isImplementMode(agentMode)
             ? "Describe a change for Cursor to implement"
             : isPlanMode(agentMode)
               ? "Plan a change before implementation"
               : "Ask Cursor anything about your repo"}
         </h2>
-        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#5f6368]">
+        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
           {isImplementMode(agentMode)
             ? "Tasks run against the repository selected in the header. The agent can edit code and may open a pull request."
             : isPlanMode(agentMode)
@@ -49,13 +52,15 @@ export default function EmptyState({
         ) : null}
         <div className="mx-auto mt-8 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2 sm:items-start">
           {prompts.map((prompt) => (
-            <button
+            <Button
               key={prompt}
+              type="button"
+              variant="outline"
               onClick={() => onPick(prompt)}
-              className="rounded-2xl border border-[#e5e5e5] bg-white px-4 py-3 text-left text-sm leading-6 text-[#5f6368] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+              className="h-auto justify-start whitespace-normal rounded-xl px-4 py-3 text-left text-sm leading-6 text-muted-foreground"
             >
               {prompt}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

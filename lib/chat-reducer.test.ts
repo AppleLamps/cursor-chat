@@ -76,7 +76,11 @@ describe("conversationReducer", () => {
       type: "patch-message",
       conversationId: "chat",
       messageId: "assistant",
-      patch: { content: "partial", activity: "Thinking..." }
+      patch: {
+        content: "partial",
+        activity: "Searching the codebase...",
+        activityLog: ["Starting Cursor cloud agent...", "Searching the codebase..."]
+      }
     });
     current = conversationReducer(current, {
       type: "merge-source",
@@ -93,6 +97,10 @@ describe("conversationReducer", () => {
           ...assistantMessage,
           content: "done",
           streaming: false,
+          activityLog: [
+            "Starting Cursor cloud agent...",
+            "Searching the codebase..."
+          ],
           sources: ["app/page.tsx"]
         }
       ],
@@ -102,6 +110,10 @@ describe("conversationReducer", () => {
 
     const conversation = current.conversations[0];
     expect(conversation.messages[1].content).toBe("done");
+    expect(conversation.messages[1].activityLog).toEqual([
+      "Starting Cursor cloud agent...",
+      "Searching the codebase..."
+    ]);
     expect(conversation.messages[1].sources).toEqual(["app/page.tsx"]);
     expect(conversation.agentId).toBe("agent");
     expect(conversation.agentSessionToken).toBe("token");

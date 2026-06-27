@@ -1,8 +1,10 @@
 "use client";
 
+import { PanelLeftIcon } from "lucide-react";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { APP_NAME, type AgentMode } from "@/lib/defaults";
 import ModeToggle, { agentModeLabel } from "@/components/chat/ModeToggle";
+import { Button } from "@/components/ui/button";
 
 export default function ChatHeader({
   onReset,
@@ -34,43 +36,55 @@ export default function ChatHeader({
   onOpenMobileSidebar: () => void;
 }) {
   return (
-    <header className="flex h-14 items-center justify-between gap-3 bg-white px-3 sm:px-5">
+    <header className="flex h-14 items-center justify-between gap-3 border-b border-border bg-background px-3 sm:px-5">
       <div className="flex min-w-0 items-center gap-2">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
           onClick={onOpenMobileSidebar}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:hidden"
+          className="md:hidden"
           aria-label="Open sidebar"
           title="Open sidebar"
         >
-          ◧
-        </button>
+          <PanelLeftIcon />
+        </Button>
         {!sidebarOpen ? (
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
             onClick={onToggleSidebar}
-            className="hidden h-9 w-9 items-center justify-center rounded-lg text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:flex"
+            className="hidden md:inline-flex"
             aria-label="Open sidebar"
             title="Open sidebar"
           >
-            ◧
-          </button>
+            <PanelLeftIcon />
+          </Button>
         ) : null}
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
           onClick={onReset}
-          className="rounded-lg px-3 py-2 text-sm font-medium text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:hidden"
+          className="md:hidden"
         >
           New chat
-        </button>
+        </Button>
         <div className="hidden min-w-0 items-center gap-2 md:flex">
-          <p className="truncate text-sm font-semibold text-[#333]">{APP_NAME}</p>
-          <span className="text-[#c7c7c7]">•</span>
-          <button
+          <p className="truncate text-sm font-semibold text-foreground">{APP_NAME}</p>
+          <span className="text-border">/</span>
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             onClick={onChangeRepo}
-            className="truncate font-mono text-xs text-[#777] transition hover:text-[#333] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-            title="Change repository"
+            className="max-w-[min(44vw,520px)] px-2 font-mono"
+            title={repoLabel}
+            aria-label={`Change repository: ${repoLabel}`}
           >
-            {repoLabel}
-          </button>
+            <span className="block min-w-0 truncate">{repoLabel}</span>
+          </Button>
           {canChangeAgentMode ? (
             <ModeToggle
               agentMode={agentMode}
@@ -79,12 +93,12 @@ export default function ChatHeader({
             />
           ) : (
             <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+              className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
                 isImplementMode(agentMode)
-                  ? "bg-[#fff4e5] text-[#9a5b00]"
+                  ? "bg-amber-100 text-amber-900"
                   : isPlanMode(agentMode)
-                    ? "bg-[#eef3ff] text-[#2850a7]"
-                    : "bg-[#f1f1f1] text-[#666]"
+                    ? "bg-blue-100 text-blue-900"
+                    : "bg-muted text-muted-foreground"
               }`}
               title="Mode is locked after the first message. Start a new chat to switch."
             >
@@ -92,14 +106,11 @@ export default function ChatHeader({
             </span>
           )}
           {prUrl ? (
-            <a
-              href={prUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 rounded-full border border-[#d9d9d9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#333] transition hover:bg-[#f7f7f8]"
-            >
-              PR
-            </a>
+            <Button asChild variant="outline" size="xs" className="uppercase tracking-[0.08em]">
+              <a href={prUrl} target="_blank" rel="noreferrer">
+                PR
+              </a>
+            </Button>
           ) : null}
         </div>
         {canChangeAgentMode ? (
@@ -113,27 +124,37 @@ export default function ChatHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={onChangeRepo}
-          className="rounded-lg px-3 py-2 text-sm font-medium text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:hidden"
+          className="hidden max-w-[42vw] px-2 font-mono sm:inline-flex md:hidden"
+          title={repoLabel}
+          aria-label={`Change repository: ${repoLabel}`}
         >
-          Repo
-        </button>
-        <button
+          <span className="block min-w-0 truncate">{repoLabel}</span>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
           onClick={onReset}
-          className="hidden rounded-lg px-3 py-2 text-sm font-medium text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] sm:inline-flex"
+          className="hidden sm:inline-flex"
         >
           New chat
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
           onClick={onShare}
           disabled={!canShare}
-          className="hidden rounded-lg px-3 py-2 text-sm font-medium text-[#444] transition hover:bg-[#f2f2f2] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] disabled:cursor-not-allowed disabled:text-[#b6b6b6] disabled:hover:bg-transparent sm:inline-flex"
+          className="hidden sm:inline-flex"
           title={shareStatus || "Share conversation"}
         >
           {shareStatus || "Share"}
-        </button>
+        </Button>
       </div>
     </header>
   );

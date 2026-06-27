@@ -36,6 +36,7 @@ export type Message = {
   error?: boolean;
   streaming?: boolean;
   activity?: string;
+  activityLog?: string[];
   thinking?: string;
   sources?: string[];
   prUrl?: string;

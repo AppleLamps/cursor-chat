@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+
 export default function ErrorBanner({
   message,
   canRetry,
@@ -10,15 +12,17 @@ export default function ErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="mx-auto mb-3 flex max-w-4xl flex-col gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mx-auto mb-3 flex max-w-4xl flex-col gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
       <span>{message}</span>
       {canRetry ? (
-        <button
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
           onClick={onRetry}
-          className="rounded-full bg-red-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-red-800 focus:outline-none focus:ring-4 focus:ring-red-300"
         >
           Retry
-        </button>
+        </Button>
       ) : null}
     </div>
   );
