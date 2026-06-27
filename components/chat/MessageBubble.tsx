@@ -1,12 +1,38 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  CheckCircle2Icon,
+  ChevronDownIcon,
+  CircleDotDashedIcon,
+  CopyIcon,
+  FileTextIcon,
+  GitPullRequestIcon,
+  RefreshCwIcon
+} from "lucide-react";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
-import type { Message } from "@/lib/chat-types";
+import type { Message, PdfAttachment } from "@/lib/chat-types";
 import { roleLabel, timeLabel } from "@/lib/chat-conversation";
 import { formatTokenUsage, telemetryTitle } from "@/lib/chat-telemetry";
 import { githubBlobUrl } from "@/lib/sources";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
+import { Button } from "@/components/ui/button";
+import {
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+  AttachmentTrigger
+} from "@/components/ui/attachment";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Marker, MarkerContent } from "@/components/ui/marker";
+import {
+  Message as MessageRow,
+  MessageContent,
+  MessageFooter,
+} from "@/components/ui/message";
 
 export default function MessageBubble({
   message,
@@ -29,11 +55,15 @@ export default function MessageBubble({
   const hasImageAttachments = imageAttachments.length > 0;
   const hasPdfAttachments = pdfAttachments.length > 0;
   const isStreaming = message.streaming === true;
+  const hasTrace =
+    !isUser &&
+    (Boolean(message.thinking?.trim()) || Boolean(message.activityLog?.length));
   const showStreamingPlaceholder =
     isStreaming && !message.content.trim() && !message.thinking?.trim();
   const showActivity =
     isStreaming &&
     message.activity &&
+    !message.activityLog?.length &&
     !["Thinking...", "Thinking…"].includes(message.activity);
   const tokenUsageLabel = formatTokenUsage(message.usage);
   const tokenUsageTitle = telemetryTitle({
@@ -43,80 +73,68 @@ export default function MessageBubble({
     modelId: message.modelId,
     durationMs: message.durationMs
   });
+  const align = isUser ? "end" : "start";
 
   return (
-    <article className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`${isUser ? "max-w-[78%]" : "w-full max-w-3xl"}`}>
-        {isUser && (hasImageAttachments || hasPdfAttachments) ? (
-          <div className="mb-2 flex flex-col items-end gap-2">
-            {hasImageAttachments ? (
-              <div className="grid max-w-[340px] grid-cols-1 gap-2">
-                {imageAttachments.map((image) => (
-                  <img
-                    key={image.id}
-                    src={image.url}
-                    alt={image.name}
-                    className="max-h-64 w-full rounded-[1.35rem] object-cover"
-                  />
-                ))}
-              </div>
-            ) : null}
-            {hasPdfAttachments ? (
-              <div className="flex max-w-[340px] flex-col gap-2">
-                {pdfAttachments.map((pdf) => (
-                  <a
-                    key={pdf.id}
-                    href={pdf.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex min-w-0 items-center gap-3 rounded-xl border border-[#e5e5e5] bg-white px-3 py-2.5 text-left text-sm text-[#111] shadow-sm transition hover:bg-[#f7f7f8]"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#ff4f45] text-xs font-bold text-white">
-                      PDF
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{pdf.name}</span>
-                      <span className="text-xs text-[#777]">PDF</span>
-                    </span>
-                  </a>
-                ))}
-              </div>
-            ) : null}
-          </div>
+    <MessageRow align={align}>
+      <MessageContent>
+        {isUser && hasImageAttachments ? (
+          <AttachmentGroup className="max-w-[340px] self-end">
+            {imageAttachments.map((image) => (
+              <Attachment
+                key={image.id}
+                orientation="vertical"
+                className="w-36 overflow-hidden"
+                title={image.name}
+              >
+                <AttachmentMedia variant="image" className="h-28">
+                  <img src={image.url} alt={image.name} />
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle>{image.name}</AttachmentTitle>
+                  <AttachmentDescription>{image.mimeType}</AttachmentDescription>
+                </AttachmentContent>
+              </Attachment>
+            ))}
+          </AttachmentGroup>
         ) : null}
 
-        <div className={isUser ? "flex justify-end" : "flex w-full justify-start"}>
-          <div
-            className={
-              isUser
-                ? "rounded-[1.35rem] bg-[#0d0d0d] px-4 py-3 text-white"
-                : message.error
-                  ? "w-full min-w-0 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-950"
-                  : "w-full min-w-0 px-1 py-1 text-[#111]"
-            }
-          >
-            {!isUser && message.thinking?.trim() ? (
-              <ThinkingPanel content={message.thinking} streaming={isStreaming} />
+        {isUser && hasPdfAttachments ? (
+          <PdfAttachmentGroup attachments={pdfAttachments} align="end" />
+        ) : null}
+
+        <Bubble
+          align={align}
+          variant={isUser ? "default" : message.error ? "destructive" : "ghost"}
+          className={isUser ? "max-w-[78%]" : "w-full max-w-3xl"}
+        >
+          <BubbleContent className={isUser ? undefined : "w-full"}>
+            {hasTrace ? (
+              <TracePanel
+                content={message.thinking || ""}
+                activityLog={message.activityLog}
+                sourceCount={message.sources?.length}
+                streaming={isStreaming}
+              />
             ) : null}
             <MarkdownMessage content={message.content} isUser={isUser} />
             {showStreamingPlaceholder ? (
-              <div className="mt-2 space-y-2">
-                <div className="h-3 w-64 max-w-full animate-pulse rounded-full bg-[#ececec]" />
-                <div className="h-3 w-48 max-w-full animate-pulse rounded-full bg-[#ececec]" />
-              </div>
+              <Marker className="mt-2">
+                <MarkerContent className="shimmer">Generating response...</MarkerContent>
+              </Marker>
             ) : null}
             {showActivity ? (
-              <p className="mt-3 text-sm text-[#8a8a8a]">{message.activity}</p>
+              <Marker className="mt-3">
+                <MarkerContent className="shimmer">{message.activity}</MarkerContent>
+              </Marker>
             ) : null}
             {!isUser && !message.error && message.prUrl ? (
-              <a
-                href={message.prUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] bg-white px-4 py-2 text-sm font-medium text-[#202123] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-              >
-                View pull request
-              </a>
+              <Button asChild variant="outline" size="sm" className="mt-4">
+                <a href={message.prUrl} target="_blank" rel="noreferrer">
+                  <GitPullRequestIcon />
+                  View pull request
+                </a>
+              </Button>
             ) : null}
             {!isUser && !message.error && message.sources?.length ? (
               <SourcesPanel
@@ -126,77 +144,98 @@ export default function MessageBubble({
               />
             ) : null}
             {!isUser && hasPdfAttachments ? (
-              <div className="mt-3 flex flex-col gap-2">
-                {pdfAttachments.map((pdf) => (
-                  <a
-                    key={pdf.id}
-                    href={pdf.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex max-w-xs items-center gap-2 rounded-md bg-[#f2f2f2] px-2 py-1 text-xs text-[#555] underline-offset-4 hover:underline"
-                  >
-                    <span>▯</span>
-                    <span className="truncate">{pdf.name}</span>
-                  </a>
-                ))}
-              </div>
+              <PdfAttachmentGroup attachments={pdfAttachments} align="start" compact />
             ) : null}
-          </div>
-        </div>
-        <div
-          className={`mt-2 flex items-center gap-3 px-1 text-xs text-[#8a8a8a] ${
-            isUser ? "justify-end" : "justify-start"
-          }`}
-        >
+          </BubbleContent>
+        </Bubble>
+
+        <MessageFooter className="gap-2">
           <span>{roleLabel(message.role)}</span>
-          <span>•</span>
+          <span aria-hidden="true">/</span>
           <time>{timeLabel(message.createdAt)}</time>
           {!isUser && !message.error && tokenUsageLabel ? (
             <>
-              <span>•</span>
+              <span aria-hidden="true">/</span>
               <span title={tokenUsageTitle || undefined}>{tokenUsageLabel}</span>
             </>
           ) : null}
           {!isUser && !message.error && !isStreaming ? (
-            <span className="hidden items-center gap-2 opacity-0 transition group-hover:inline-flex group-hover:opacity-100 sm:inline-flex">
-              <button
-                type="button"
-                onClick={onCopy}
-                className="rounded px-1 py-0.5 hover:bg-[#f2f2f2] hover:text-[#444] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-              >
+            <span className="inline-flex items-center gap-1 transition sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-within:opacity-100">
+              <Button type="button" variant="ghost" size="xs" onClick={onCopy}>
+                <CopyIcon />
                 {copied ? "Copied" : "Copy"}
-              </button>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={onRetry}
-                className="rounded px-1 py-0.5 hover:bg-[#f2f2f2] hover:text-[#444] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
-              >
+              </Button>
+              <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
+                <RefreshCwIcon />
                 Retry
-              </button>
+              </Button>
             </span>
           ) : null}
-        </div>
-      </div>
-    </article>
+        </MessageFooter>
+      </MessageContent>
+    </MessageRow>
   );
 }
 
-function ThinkingPanel({
+function PdfAttachmentGroup({
+  attachments,
+  align,
+  compact
+}: {
+  attachments: PdfAttachment[];
+  align: "start" | "end";
+  compact?: boolean;
+}) {
+  return (
+    <AttachmentGroup
+      className={align === "end" ? "mb-1 max-w-[340px] self-end" : "mt-4"}
+    >
+      {attachments.map((pdf) => (
+        <Attachment
+          key={pdf.id}
+          size={compact ? "sm" : "default"}
+          className={compact ? "max-w-xs" : "max-w-[340px]"}
+        >
+          <AttachmentTrigger asChild>
+            <a href={pdf.url} target="_blank" rel="noreferrer" aria-label={`Open ${pdf.name}`}>
+              <span className="sr-only">Open {pdf.name}</span>
+            </a>
+          </AttachmentTrigger>
+          <AttachmentMedia>
+            <FileTextIcon />
+          </AttachmentMedia>
+          <AttachmentContent className="pr-2">
+            <AttachmentTitle>{pdf.name}</AttachmentTitle>
+            <AttachmentDescription>PDF</AttachmentDescription>
+          </AttachmentContent>
+        </Attachment>
+      ))}
+    </AttachmentGroup>
+  );
+}
+
+function TracePanel({
   content,
+  activityLog = [],
+  sourceCount = 0,
   streaming
 }: {
   content: string;
+  activityLog?: string[];
+  sourceCount?: number;
   streaming?: boolean;
 }) {
-  const [open, setOpen] = useState(Boolean(streaming));
+  const [open, setOpen] = useState(true);
+  const userToggledRef = useRef(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  const traceText = content.trim();
+  const uniqueActivityLog = activityLog.filter(
+    (item, index) => item.trim() && item !== activityLog[index - 1]
+  );
 
   useEffect(() => {
-    if (streaming) {
+    if (streaming && !userToggledRef.current) {
       setOpen(true);
-    } else {
-      setOpen(false);
     }
   }, [streaming]);
 
@@ -206,42 +245,79 @@ function ThinkingPanel({
   }, [content, streaming, open]);
 
   return (
-    <div className="mb-3 w-full rounded-xl border border-[#ececec] bg-[#fafafa]">
+    <div className="mb-4 w-full overflow-hidden rounded-xl border border-border bg-muted/40">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-[#555] transition hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+        onClick={() => {
+          userToggledRef.current = true;
+          setOpen((current) => !current);
+        }}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition hover:bg-background/60 focus:outline-none focus:ring-2 focus:ring-ring/50"
         aria-expanded={open ? "true" : "false"}
       >
-        <span className="font-medium">{streaming ? "Thinking..." : "Thinking"}</span>
-        <IconChevron open={open} />
+        <span className="flex min-w-0 items-center gap-2">
+          {streaming ? (
+            <CircleDotDashedIcon className="size-4 animate-spin text-muted-foreground" />
+          ) : (
+            <CheckCircle2Icon className="size-4 text-muted-foreground" />
+          )}
+          <span className="font-semibold text-foreground">
+            {streaming ? "Tracing agent flow" : "Agent trace"}
+          </span>
+          {sourceCount > 0 ? (
+            <span className="hidden rounded-md bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground sm:inline">
+              {sourceCount} sources
+            </span>
+          ) : null}
+        </span>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={`size-4 shrink-0 text-muted-foreground transition ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {open ? (
         <div
           ref={previewRef}
-          className="max-h-40 overflow-y-auto border-t border-[#ececec] px-3 py-2.5"
+          className="max-h-96 overflow-y-auto border-t border-border bg-background/40 px-3 py-3"
         >
-          <p className="whitespace-pre-wrap text-xs leading-5 text-[#666]">{content}</p>
+          {uniqueActivityLog.length ? (
+            <ol className="space-y-2.5">
+              {uniqueActivityLog.map((item, index) => {
+                const active = streaming && index === uniqueActivityLog.length - 1;
+
+                return (
+                  <li key={`${item}-${index}`} className="flex gap-2.5">
+                    <span
+                      className={`mt-1 size-2 shrink-0 rounded-full ${
+                        active ? "bg-foreground" : "bg-border"
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span
+                      className={`min-w-0 text-xs leading-5 ${
+                        active ? "font-medium text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {item}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
+          {traceText ? (
+            <div className={uniqueActivityLog.length ? "mt-3 border-t border-border pt-3" : ""}>
+              <p className="mb-1 text-[11px] font-semibold uppercase text-muted-foreground">
+                Reasoning summary
+              </p>
+              <p className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                {traceText}
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
-  );
-}
-
-function IconChevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className={`h-4 w-4 text-[#777] transition ${open ? "rotate-180" : ""}`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
   );
 }
 
@@ -257,15 +333,18 @@ function SourcesPanel({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="mt-4 border-t border-[#ececec] pt-3">
+    <div className="mt-4 border-t border-border pt-3">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between text-left text-sm text-[#555] transition hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+        className="flex w-full items-center justify-between text-left text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
         aria-expanded={open ? "true" : "false"}
       >
         <span className="font-medium">Sources ({sources.length})</span>
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {open ? (
         <ul className="mt-2 space-y-1">
@@ -273,7 +352,7 @@ function SourcesPanel({
             const href = repoUrl ? githubBlobUrl(repoUrl, branch, path) : null;
 
             return (
-              <li key={path} className="font-mono text-xs text-[#666]">
+              <li key={path} className="font-mono text-xs text-muted-foreground">
                 {href ? (
                   <a
                     href={href}

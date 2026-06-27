@@ -183,7 +183,8 @@ export function useChatSend({
         content: "",
         createdAt: new Date().toISOString(),
         streaming: true,
-        activity: assistantActivity
+        activity: assistantActivity,
+        activityLog: [assistantActivity]
       };
 
       replaceMessagesForConversation(conversationId, [
@@ -195,7 +196,10 @@ export function useChatSend({
         patchMessageForConversation(conversationId, assistantId, {
           content: snapshot.content,
           thinking: snapshot.thinking || undefined,
-          activity: snapshot.activity || undefined
+          activity: snapshot.activity || undefined,
+          activityLog: snapshot.activityLog.length
+            ? snapshot.activityLog
+            : undefined
         });
       });
       streamBuffer.setActivity(assistantActivity);
@@ -281,6 +285,7 @@ export function useChatSend({
         });
 
         streamBuffer.flushNow();
+        const finalActivityLog = streamBuffer.getSnapshot().activityLog;
 
         if (!assistantContent.trim()) {
           throw new Error("Cursor returned no assistant content.");
@@ -293,6 +298,7 @@ export function useChatSend({
           createdAt: streamingAssistant.createdAt,
           streaming: false,
           thinking: assistantThinking || undefined,
+          activityLog: finalActivityLog.length ? finalActivityLog : undefined,
           sources: assistantSources,
           prUrl: assistantPrUrl,
           runId: assistantRunId,

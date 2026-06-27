@@ -1,7 +1,19 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, RefObject } from "react";
+import { ImageIcon, LinkIcon, MicIcon, PaperclipIcon, SendIcon, SquareIcon, XIcon } from "lucide-react";
 import type { ImageAttachment, PdfAttachment } from "@/lib/chat-types";
+import { Button } from "@/components/ui/button";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle
+} from "@/components/ui/attachment";
 
 export default function Composer({
   value,
@@ -44,54 +56,55 @@ export default function Composer({
 }) {
   return (
     <form onSubmit={onSubmit} className="mx-auto max-w-3xl">
-      <div className="rounded-[1.75rem] border border-[#d9d9d9] bg-white p-2 shadow-[0_8px_30px_rgba(0,0,0,0.10)] transition focus-within:border-[#bdbdbd]">
+      <div className="rounded-2xl border border-border bg-card p-2 shadow-lg shadow-foreground/10 transition focus-within:border-ring">
         {images.length > 0 || pdfs.length > 0 ? (
-          <div className="flex gap-2 overflow-x-auto px-2 pb-2 pt-1">
+          <AttachmentGroup className="px-2 pb-3 pt-1">
             {images.map((image) => (
-              <div
+              <Attachment
                 key={image.id}
-                className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-[#d9d9d9] bg-[#f7f7f8]"
+                orientation="vertical"
+                className="w-28 overflow-hidden"
                 title={image.name}
               >
-                <img
-                  src={image.url}
-                  alt={image.name}
-                  className="h-full w-full object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => onRemoveImage(image.id)}
-                  className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-sm text-white transition hover:bg-black"
-                  aria-label={`Remove ${image.name}`}
-                >
-                  ×
-                </button>
-              </div>
+                <AttachmentMedia variant="image" className="h-24">
+                  <img src={image.url} alt={image.name} />
+                </AttachmentMedia>
+                <AttachmentContent>
+                  <AttachmentTitle>{image.name}</AttachmentTitle>
+                  <AttachmentDescription>{image.mimeType}</AttachmentDescription>
+                </AttachmentContent>
+                <AttachmentActions>
+                  <AttachmentAction
+                    type="button"
+                    onClick={() => onRemoveImage(image.id)}
+                    aria-label={`Remove ${image.name}`}
+                  >
+                    <XIcon />
+                  </AttachmentAction>
+                </AttachmentActions>
+              </Attachment>
             ))}
             {pdfs.map((pdf) => (
-              <div
-                key={pdf.id}
-                className="relative flex h-16 w-72 max-w-[80vw] shrink-0 items-center gap-3 rounded-xl border border-[#d9d9d9] bg-[#f7f7f8] px-3 pr-9 text-sm text-[#222]"
-                title={pdf.name}
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#ff4f45] text-xs font-bold text-white">
-                  PDF
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{pdf.name}</span>
-                  <span className="text-xs text-[#777]">PDF</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRemovePdf(pdf.id)}
-                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-sm text-white transition hover:bg-black"
-                  aria-label={`Remove ${pdf.name}`}
-                >
-                  ×
-                </button>
-              </div>
+              <Attachment key={pdf.id} className="w-72 max-w-[80vw]" title={pdf.name}>
+                <AttachmentMedia>
+                  <span className="text-[10px] font-bold">PDF</span>
+                </AttachmentMedia>
+                <AttachmentContent className="pr-2">
+                  <AttachmentTitle>{pdf.name}</AttachmentTitle>
+                  <AttachmentDescription>PDF</AttachmentDescription>
+                </AttachmentContent>
+                <AttachmentActions>
+                  <AttachmentAction
+                    type="button"
+                    onClick={() => onRemovePdf(pdf.id)}
+                    aria-label={`Remove ${pdf.name}`}
+                  >
+                    <XIcon />
+                  </AttachmentAction>
+                </AttachmentActions>
+              </Attachment>
             ))}
-          </div>
+          </AttachmentGroup>
         ) : null}
         <textarea
           ref={inputRef}
@@ -100,71 +113,59 @@ export default function Composer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           rows={1}
-          className="max-h-44 min-h-[46px] w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-[#0d0d0d] outline-none placeholder:text-[#9b9b9b]"
+          className="max-h-44 min-h-[50px] w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
           disabled={isSending}
         />
-        <div className="flex items-center justify-between px-2 pb-1">
-          <div className="flex items-center gap-2">
-            <button
+        <div className="flex items-center justify-between px-2 pb-1 pt-1">
+          <div className="flex items-center gap-1.5">
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={onAttachClick}
               disabled={isSending || isReadingFiles}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-xl text-[#6f6f6f] transition hover:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
               aria-label="Add image"
               title="Attach PNG, JPEG, WebP, or GIF"
             >
-              {isReadingFiles ? "..." : "+"}
-            </button>
-            <button
+              {isReadingFiles ? <PaperclipIcon className="animate-pulse" /> : <ImageIcon />}
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={onHostedImageClick}
               disabled={isSending || isReadingFiles}
-              className="rounded-full px-3 py-1.5 text-xs font-medium text-[#6f6f6f] transition hover:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] disabled:cursor-not-allowed disabled:text-[#b6b6b6]"
               title="Attach hosted image URL"
             >
+              <LinkIcon />
               URL
-            </button>
+            </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <button
+          <div className="flex items-center gap-1.5">
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={onToggleVoice}
-              className="hidden h-8 w-8 items-center justify-center rounded-full text-[#6f6f6f] transition hover:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] sm:flex"
+              className="hidden sm:inline-flex"
               aria-label={isListening ? "Stop voice input" : "Start voice input"}
               title={isListening ? "Stop voice input" : "Start voice input"}
             >
-              {isListening ? (
-                <span className="h-2.5 w-2.5 rounded-[2px] bg-current" />
-              ) : (
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  className="h-[18px] w-[18px]"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" />
-                  <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
-                  <path d="M12 18v3" />
-                  <path d="M8 21h8" />
-                </svg>
-              )}
-            </button>
-            <button
+              {isListening ? <SquareIcon className="fill-current" /> : <MicIcon />}
+            </Button>
+            <Button
               type="submit"
+              size="icon-lg"
               disabled={!canSend}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#0d0d0d] text-white shadow-sm transition hover:bg-[#303030] focus:outline-none focus:ring-4 focus:ring-black/10 disabled:cursor-not-allowed disabled:bg-[#d9d9d9] disabled:text-white disabled:shadow-none"
               aria-label="Send message"
+              className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground"
             >
-              {isSending ? "..." : "↑"}
-            </button>
+              <SendIcon className={isSending ? "animate-pulse" : ""} />
+            </Button>
           </div>
         </div>
       </div>
-      <p className="mt-2 text-center text-[11px] text-[#8a8a8a]">
+      <p className="mt-2 text-center text-[11px] text-muted-foreground">
         {note || "AI can make mistakes. Check important info."}
       </p>
     </form>

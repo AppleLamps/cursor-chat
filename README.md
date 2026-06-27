@@ -11,8 +11,8 @@
 - **Plan mode**: read-only implementation planning through the Cursor SDK `mode: "plan"` option
 - **Implement mode** (optional): scoped code changes with automatic pull request creation via `autoCreatePR`
 - Cursor cloud agents via `@cursor/sdk@1.0.22` (`Agent.create` / `Agent.resume`)
-- Streaming answers over SSE with live tool activity and collapsible **Thinking** panel
-- Markdown responses with styled code blocks, one-click copy, and **View pull request** links when a PR is opened
+- Streaming answers over SSE with live tool activity, source discovery, and an expandable **Agent trace** timeline
+- Markdown responses with styled code blocks, one-click copy, shadcn-based chat controls, and **View pull request** links when a PR is opened
 - Quiet per-answer token usage display when Cursor reports usage, plus request IDs in server logs for debugging
 - Image attachments (PNG, JPEG, WebP, GIF — file upload or public URL, up to 5 per message)
 - Collapsible **Sources** panel with GitHub links for files the agent read
@@ -25,6 +25,8 @@
 - Next.js App Router
 - React + TypeScript
 - Tailwind CSS
+- shadcn UI primitives via `@shadcn/react`
+- Radix UI, `class-variance-authority`, `clsx`, `tailwind-merge`, and `lucide-react`
 - `@cursor/sdk`
 
 ## Requirements
@@ -76,6 +78,7 @@ npm run start
 4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
 5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:
    - `agent`, `status`, `text`, `thinking`, `tool`, `source`, `done`, `error`
+   - `status` and `tool` events are accumulated client-side as an ordered **Agent trace** timeline; `thinking` events are shown as a reasoning summary inside the same panel.
 6. **First message** in a conversation: the server validates mode policy, then `Agent.create()` and `agent.send()` run with the mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
    - **Ask mode:** read-only prompt; SDK `mode: "agent"`; `skipReviewerRequest: true`
    - **Plan mode:** read-only planning prompt; SDK `mode: "plan"`; `skipReviewerRequest: true`
@@ -139,6 +142,7 @@ app/
 components/
   ChatApp.tsx             Chat shell and hook wiring
   chat/                   Presentational chat UI components
+  ui/                     shadcn-based shared UI primitives
   Onboarding.tsx          API key gate
   RepoPicker.tsx          Repository, branch, and mode picker
   SidebarRecents.tsx      Conversation sidebar
@@ -194,6 +198,7 @@ Usage is billed to each user's Cursor account through normal cloud agent consump
 - Changing the repository or branch on a thread clears its `agentId` so the next message starts a fresh cloud agent with the system prompt re-sent.
 - Failed chat responses clear the stored `agentId` so the next retry can start clean.
 - Completed assistant messages store `runId`, optional `requestId`, duration, model ID, and token usage when Cursor reports them. Share transcripts intentionally omit this telemetry.
+- Assistant messages also store the streamed `activityLog` that powers the Agent trace timeline.
 - Text-only or image+text chat (up to 5 images per message via Cursor SDK).
 - PDF attachments are not supported.
 - GitHub token is only used to list branches via `/api/branches`; it is not sent to Cursor.

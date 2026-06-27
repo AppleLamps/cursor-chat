@@ -9,6 +9,14 @@ import EmptyState from "@/components/chat/EmptyState";
 import ErrorBanner from "@/components/chat/ErrorBanner";
 import ChatSidebars from "@/components/chat/ChatSidebars";
 import MessageBubble from "@/components/chat/MessageBubble";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport
+} from "@/components/ui/message-scroller";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { createConversation } from "@/lib/chat-conversation";
 import type { Conversation, RepoPickerMode } from "@/lib/chat-types";
@@ -37,7 +45,6 @@ export default function ChatApp() {
   const [repoPickerMode, setRepoPickerMode] =
     useState<RepoPickerMode>("initial");
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const setChatErrorRef = useRef<(message: string | null) => void>(() => undefined);
@@ -113,13 +120,6 @@ export default function ChatApp() {
       sidebarOpen ? "expanded" : "collapsed"
     );
   }, [sidebarOpen, conversations.hasHydrated]);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth"
-    });
-  }, [conversations.messages, chat.isSending]);
 
   function activateConversation(conversation: Conversation) {
     conversations.activateConversation(conversation);
@@ -262,7 +262,9 @@ export default function ChatApp() {
       : null;
   const resolvedComposerNote = chat.composerNote ?? implementModeNote ?? planModeNote;
   const canSend =
-    (input.trim().length > 0 || attachments.pendingImages.length > 0) &&
+    (input.trim().length > 0 ||
+      attachments.pendingImages.length > 0 ||
+      attachments.pendingPdfs.length > 0) &&
     !chat.isSending &&
     !attachments.isReadingFiles;
   const needsInitialRepoPicker = Boolean(
@@ -302,7 +304,7 @@ export default function ChatApp() {
   }
 
   return (
-    <main className="flex h-screen overflow-hidden bg-white text-[#0d0d0d]">
+    <main className="flex h-screen overflow-hidden bg-background text-foreground">
       <ChatSidebars
         conversations={conversations.conversations}
         activeConversationId={conversations.activeConversationId}
@@ -326,7 +328,7 @@ export default function ChatApp() {
         onSaveGitHubToken={auth.saveGitHubToken}
       />
 
-      <section className="relative flex min-w-0 flex-1 flex-col bg-white">
+      <section className="relative flex min-w-0 flex-1 flex-col bg-background">
         {repoPickerOpen ? (
           <RepoPicker
             mode="modal"
@@ -383,37 +385,51 @@ export default function ChatApp() {
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
         />
 
-        <div
-          ref={scrollRef}
-          className="scrollbar-soft flex-1 overflow-y-auto px-4 pb-44 pt-8 sm:px-6"
+        <MessageScrollerProvider
+          autoScroll
+          defaultScrollPosition="end"
+          scrollEdgeThreshold={48}
+          scrollPreviousItemPeek={96}
         >
-          {conversations.messages.length === 0 ? (
-            <EmptyState
-              agentMode={conversations.activeAgentMode}
-              onAgentModeChange={conversations.setActiveConversationAgentMode}
-              onPick={(prompt) => {
-                setInput(prompt);
-                inputRef.current?.focus();
-              }}
-            />
-          ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-7">
-              {conversations.messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  repoUrl={conversations.activeConversation?.repoUrl}
-                  branch={conversations.activeConversation?.branch || DEFAULT_BRANCH}
-                  copied={chat.copiedMessageId === message.id}
-                  onCopy={() => void chat.copyMessage(message)}
-                  onRetry={() => chat.retryAssistantMessage(message.id)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+          <MessageScroller className="flex-1">
+            <MessageScrollerViewport className="px-4 pb-52 pt-8 sm:px-6 sm:pb-44">
+              {conversations.messages.length === 0 ? (
+                <MessageScrollerContent className="min-h-full">
+                  <EmptyState
+                    agentMode={conversations.activeAgentMode}
+                    onAgentModeChange={conversations.setActiveConversationAgentMode}
+                    onPick={(prompt) => {
+                      setInput(prompt);
+                      inputRef.current?.focus();
+                    }}
+                  />
+                </MessageScrollerContent>
+              ) : (
+                <MessageScrollerContent className="mx-auto max-w-3xl gap-6">
+                  {conversations.messages.map((message) => (
+                    <MessageScrollerItem
+                      key={message.id}
+                      messageId={message.id}
+                      scrollAnchor={message.role === "user"}
+                    >
+                      <MessageBubble
+                        message={message}
+                        repoUrl={conversations.activeConversation?.repoUrl}
+                        branch={conversations.activeConversation?.branch || DEFAULT_BRANCH}
+                        copied={chat.copiedMessageId === message.id}
+                        onCopy={() => void chat.copyMessage(message)}
+                        onRetry={() => chat.retryAssistantMessage(message.id)}
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              )}
+            </MessageScrollerViewport>
+            <MessageScrollerButton className="bottom-36" />
+          </MessageScroller>
+        </MessageScrollerProvider>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-white via-white to-white/0 px-4 pb-4 pt-12 sm:px-6">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 px-4 pb-4 pt-12 sm:px-6">
           <div className="pointer-events-auto">
             {chat.error && (
               <ErrorBanner
@@ -439,10 +455,10 @@ export default function ChatApp() {
               note={resolvedComposerNote}
               placeholder={
                 isImplementMode(conversations.activeAgentMode)
-                  ? "Describe the change you want. Enter sends, Shift+Enter adds a line."
+                  ? "Describe the change you want"
                   : isPlanMode(conversations.activeAgentMode)
-                    ? "Describe what you want planned. Enter sends, Shift+Enter adds a line."
-                  : "Ask about this repository. Enter sends, Shift+Enter adds a line."
+                    ? "Describe what you want planned"
+                  : "Ask about this repository"
               }
               onAttachClick={() => fileInputRef.current?.click()}
               onHostedImageClick={attachments.addHostedImageUrl}
