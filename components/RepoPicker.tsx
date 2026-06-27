@@ -20,6 +20,7 @@ type RepoPickerProps = {
   submitLabel?: string;
   mode?: "page" | "modal";
   onRetry: () => void;
+  onChangeCredentials?: () => void;
   onSelect: (
     repoUrl: string,
     branch: string,
@@ -43,6 +44,7 @@ export default function RepoPicker({
   submitLabel = "Continue",
   mode = "page",
   onRetry,
+  onChangeCredentials,
   onSelect,
   onCancel
 }: RepoPickerProps) {
@@ -115,9 +117,16 @@ export default function RepoPicker({
       {loading ? (
         <RepoPickerLoading />
       ) : error ? (
-        <RepoPickerError message={error} onRetry={onRetry} />
+        <RepoPickerError
+          message={error}
+          onRetry={onRetry}
+          onChangeCredentials={onChangeCredentials}
+        />
       ) : repos.length === 0 ? (
-        <RepoPickerEmpty onRetry={onRetry} />
+        <RepoPickerEmpty
+          onRetry={onRetry}
+          onChangeCredentials={onChangeCredentials}
+        />
       ) : (
         <>
           <div className="flex items-center justify-between gap-3">
@@ -380,10 +389,12 @@ function RepoPickerLoading() {
 
 function RepoPickerError({
   message,
-  onRetry
+  onRetry,
+  onChangeCredentials
 }: {
   message: string;
   onRetry: () => void;
+  onChangeCredentials?: () => void;
 }) {
   return (
     <div className="space-y-4">
@@ -391,19 +402,37 @@ function RepoPickerError({
         <p className="text-sm font-medium text-red-950">Could not load repositories</p>
         <p className="mt-1 text-sm leading-6 text-red-900/80">{message}</p>
       </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
-      >
-        <IconRefresh className="h-4 w-4" />
-        Retry
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
+        >
+          <IconRefresh className="h-4 w-4" />
+          Retry
+        </button>
+        {onChangeCredentials ? (
+          <button
+            type="button"
+            onClick={onChangeCredentials}
+            className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
+          >
+            <IconKey className="h-4 w-4" />
+            Change tokens
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function RepoPickerEmpty({ onRetry }: { onRetry: () => void }) {
+function RepoPickerEmpty({
+  onRetry,
+  onChangeCredentials
+}: {
+  onRetry: () => void;
+  onChangeCredentials?: () => void;
+}) {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-dashed border-[#d9d9d9] px-4 py-6 text-center">
@@ -415,14 +444,26 @@ function RepoPickerEmpty({ onRetry }: { onRetry: () => void }) {
           Connect a GitHub repository in Cursor, then reload the list here.
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
-      >
-        <IconRefresh className="h-4 w-4" />
-        Retry
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
+        >
+          <IconRefresh className="h-4 w-4" />
+          Retry
+        </button>
+        {onChangeCredentials ? (
+          <button
+            type="button"
+            onClick={onChangeCredentials}
+            className="inline-flex items-center gap-2 rounded-full border border-[#d9d9d9] px-4 py-2 text-sm font-medium text-[#333] transition hover:bg-[#f7f7f8]"
+          >
+            <IconKey className="h-4 w-4" />
+            Change tokens
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -513,6 +554,26 @@ function IconRefresh({ className = "h-4 w-4" }: { className?: string }) {
       <path d="M3 3v5h5" />
       <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
       <path d="M16 21h5v-5" />
+    </svg>
+  );
+}
+
+function IconKey({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="15" r="4" />
+      <path d="m10.5 12.5 7-7" />
+      <path d="m18 5 1 1" />
+      <path d="m15 8 1 1" />
     </svg>
   );
 }

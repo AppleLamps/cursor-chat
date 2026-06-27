@@ -298,6 +298,7 @@ export default function ChatApp() {
         initialBranch={getDefaultBranch() || DEFAULT_BRANCH}
         initialAgentMode={getDefaultAgentMode()}
         onRetry={() => void repos.loadRepositories(auth.apiKey!)}
+        onChangeCredentials={handleSignOut}
         onSelect={handleRepoSelect}
       />
     );
@@ -360,6 +361,7 @@ export default function ChatApp() {
             }
             submitLabel={repoPickerMode === "new-chat" ? "Start chat" : "Save"}
             onRetry={() => void repos.loadRepositories(auth.apiKey!)}
+            onChangeCredentials={handleSignOut}
             onSelect={handleRepoSelect}
             onCancel={() => setRepoPickerOpen(false)}
           />
