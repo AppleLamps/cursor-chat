@@ -19,10 +19,10 @@ import {
   parseChatImages
 } from "@/lib/chat-images";
 import {
-  bodyTooLargeResponse,
   checkRateLimit,
   claimChatConcurrencySlot,
   limiterUnavailableResponse,
+  readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
 import {
@@ -49,6 +49,7 @@ type ChatRequest = {
 };
 
 const MAX_PROMPT_CHARS = 32_000;
+const DEFAULT_CHAT_RUN_TIMEOUT_MS = 10 * 60_000;
 
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream; charset=utf-8",
@@ -76,6 +77,17 @@ type RunTelemetry = {
   requestId?: string;
   usage?: ReturnType<typeof normalizeTokenUsage>;
 };
+
+function parseChatRunTimeoutMs() {
+  const value = Number(process.env.ASKCURSOR_CHAT_RUN_TIMEOUT_MS);
+  return Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_CHAT_RUN_TIMEOUT_MS;
+}
+
+function formatTimeoutSeconds(timeoutMs: number) {
+  return Math.max(1, Math.ceil(timeoutMs / 1000)).toLocaleString();
+}
 
 function createStreamCallbacks(
   send: StreamRunContext["send"],
@@ -331,32 +343,13 @@ async function startFollowUpRun({
 }
 
 export async function POST(request: Request) {
-  const tooLarge = bodyTooLargeResponse(request, MAX_CHAT_BODY_BYTES);
-  if (tooLarge) return tooLarge;
+  const parsedBody = await readJsonBody<ChatRequest>(request, MAX_CHAT_BODY_BYTES);
+  if (!parsedBody.ok) return parsedBody.response;
 
-  let body: ChatRequest;
-
-  try {
-    body = (await request.json()) as ChatRequest;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
-  }
+  const body = parsedBody.body;
 
   const apiKey = body.apiKey?.trim();
   const agentMode = parseAgentMode(body.agentMode);
-  const rateLimit = await checkRateLimit(
-    isImplementMode(agentMode) ? "chatImplement" : "chat",
-    request,
-    { apiKey }
-  );
-  if (!rateLimit.allowed) {
-    if (rateLimit.unavailable) {
-      return limiterUnavailableResponse();
-    }
-
-    return rateLimitedResponse(rateLimit.retryAfterSeconds);
-  }
-
   const prompt = body.prompt?.trim();
   const repoValidation = validateRepoUrl(body.repoUrl);
   if (!repoValidation.ok) {
@@ -424,6 +417,19 @@ export async function POST(request: Request) {
     );
   }
 
+  const rateLimit = await checkRateLimit(
+    isImplementMode(agentMode) ? "chatImplement" : "chat",
+    request,
+    { apiKey }
+  );
+  if (!rateLimit.allowed) {
+    if (rateLimit.unavailable) {
+      return limiterUnavailableResponse();
+    }
+
+    return rateLimitedResponse(rateLimit.retryAfterSeconds);
+  }
+
   const promptText = buildUserPrompt(prompt || defaultImagePrompt());
   const concurrencySlot = await claimChatConcurrencySlot();
   if (!concurrencySlot.allowed) {
@@ -437,13 +443,64 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
-      const send = (event: ChatStreamEventName, data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(formatSseEvent(event, data)));
-      };
-
+      const runTimeoutMs = parseChatRunTimeoutMs();
+      let streamClosed = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let slotReleased = false;
       let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
       let currentRun: Run | null = null;
       let resolvedAgentIdForLog = agentId;
+
+      const send = (event: ChatStreamEventName, data: Record<string, unknown>) => {
+        if (streamClosed) return;
+        controller.enqueue(encoder.encode(formatSseEvent(event, data)));
+      };
+
+      const closeStream = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        controller.close();
+      };
+
+      const releaseSlot = async () => {
+        if (slotReleased) return;
+        slotReleased = true;
+        await concurrencySlot.release();
+      };
+
+      const disposeAgent = async () => {
+        if (!disposableAgent) return;
+        const agent = disposableAgent;
+        disposableAgent = null;
+        await agent[Symbol.asyncDispose]();
+      };
+
+      const timeoutRun = async () => {
+        send("error", {
+          message: `The Cursor agent run timed out after ${formatTimeoutSeconds(runTimeoutMs)} seconds.`
+        });
+        closeStream();
+
+        try {
+          if (currentRun?.supports("cancel")) {
+            await currentRun.cancel();
+          }
+        } catch (error) {
+          console.error("Failed to cancel timed out Cursor agent run.", error);
+        }
+
+        try {
+          await disposeAgent();
+        } catch (error) {
+          console.error("Failed to dispose timed out Cursor agent.", error);
+        }
+
+        await releaseSlot();
+      };
+
+      timeout = setTimeout(() => {
+        void timeoutRun();
+      }, runTimeoutMs);
 
       try {
         send("status", { message: "Starting Cursor cloud agent..." });
@@ -586,11 +643,10 @@ export async function POST(request: Request) {
               : "Failed to run the Cursor agent."
         });
       } finally {
-        if (disposableAgent) {
-          await disposableAgent[Symbol.asyncDispose]();
-        }
-        await concurrencySlot.release();
-        controller.close();
+        if (timeout) clearTimeout(timeout);
+        await disposeAgent();
+        await releaseSlot();
+        closeStream();
       }
     }
   });

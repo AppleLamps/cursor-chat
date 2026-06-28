@@ -49,6 +49,11 @@ Recommended controls for environments that enable these tools:
 Production deployments must configure durable request controls and stable agent
 session signing. Missing request-control storage intentionally fails closed.
 
+Development without `ASKCURSOR_AGENT_SESSION_SECRET`, `AUTH_SECRET`, or
+`NEXTAUTH_SECRET` uses a random per-process signing secret. That is acceptable
+for local testing, but follow-up agent session tokens become invalid after a dev
+server restart. Set one of those variables locally when testing resume flows.
+
 Required production variables:
 
 - `UPSTASH_REDIS_REST_URL`

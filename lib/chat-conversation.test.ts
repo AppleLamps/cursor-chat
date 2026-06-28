@@ -5,6 +5,7 @@ import {
   normalizeConversation,
   sortConversations,
   titleFromMessages,
+  uid,
   withPersistedMessages
 } from "@/lib/chat-conversation";
 import type { Conversation, Message } from "@/lib/chat-types";
@@ -32,6 +33,12 @@ describe("chat conversation helpers", () => {
     expect(conversation.agentMode).toBe("qa");
     expect(conversation.messages).toEqual([]);
     expect(planConversation.agentMode).toBe("plan");
+  });
+
+  it("generates collision-resistant UUID-style ids when available", () => {
+    expect(uid()).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
   });
 
   it("sorts conversations newest first", () => {

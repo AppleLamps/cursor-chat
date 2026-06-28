@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { MAX_CHAT_IMAGES } from "@/lib/chat-images";
 import type { ImageAttachment, PdfAttachment } from "@/lib/chat-types";
 import { uid } from "@/lib/chat-conversation";
@@ -29,11 +29,23 @@ export function useAttachments({
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   const [pendingPdfs, setPendingPdfs] = useState<PdfAttachment[]>([]);
   const [isReadingFiles, setIsReadingFiles] = useState(false);
+  const pendingImagesRef = useRef<ImageAttachment[]>([]);
+  const pendingPdfsRef = useRef<PdfAttachment[]>([]);
+
+  const replacePendingImages = useCallback((images: ImageAttachment[]) => {
+    pendingImagesRef.current = images;
+    setPendingImages(images);
+  }, []);
+
+  const replacePendingPdfs = useCallback((pdfs: PdfAttachment[]) => {
+    pendingPdfsRef.current = pdfs;
+    setPendingPdfs(pdfs);
+  }, []);
 
   const clearPendingAttachments = useCallback(() => {
-    setPendingImages([]);
-    setPendingPdfs([]);
-  }, []);
+    replacePendingImages([]);
+    replacePendingPdfs([]);
+  }, [replacePendingImages, replacePendingPdfs]);
 
   const addAttachments = useCallback(
     async (files: FileList | null) => {
@@ -78,15 +90,14 @@ export function useAttachments({
         }
 
         if (imageBlocks.length > 0) {
-          setPendingImages((current) => {
-            const combined = [...current, ...imageBlocks];
-            if (combined.length > MAX_CHAT_IMAGES) {
-              throw new Error(
-                `You can attach up to ${MAX_CHAT_IMAGES} images per message.`
-              );
-            }
-            return combined;
-          });
+          const combined = [...pendingImagesRef.current, ...imageBlocks];
+          if (combined.length > MAX_CHAT_IMAGES) {
+            throw new Error(
+              `You can attach up to ${MAX_CHAT_IMAGES} images per message.`
+            );
+          }
+
+          replacePendingImages(combined);
         }
 
         const notes = [
@@ -111,33 +122,31 @@ export function useAttachments({
         setIsReadingFiles(false);
       }
     },
-    [appendInput, focusInput, setComposerNote, setError]
+    [appendInput, focusInput, replacePendingImages, setComposerNote, setError]
   );
 
   const removePendingImage = useCallback(
     (id: string) => {
-      setPendingImages((current) => {
-        const next = current.filter((image) => image.id !== id);
-        if (next.length === 0 && pendingPdfs.length === 0) {
-          setComposerNote(null);
-        }
-        return next;
-      });
+      const next = pendingImagesRef.current.filter((image) => image.id !== id);
+      replacePendingImages(next);
+
+      if (next.length === 0 && pendingPdfsRef.current.length === 0) {
+        setComposerNote(null);
+      }
     },
-    [pendingPdfs.length, setComposerNote]
+    [replacePendingImages, setComposerNote]
   );
 
   const removePendingPdf = useCallback(
     (id: string) => {
-      setPendingPdfs((current) => {
-        const next = current.filter((pdf) => pdf.id !== id);
-        if (next.length === 0 && pendingImages.length === 0) {
-          setComposerNote(null);
-        }
-        return next;
-      });
+      const next = pendingPdfsRef.current.filter((pdf) => pdf.id !== id);
+      replacePendingPdfs(next);
+
+      if (next.length === 0 && pendingImagesRef.current.length === 0) {
+        setComposerNote(null);
+      }
     },
-    [pendingImages.length, setComposerNote]
+    [replacePendingPdfs, setComposerNote]
   );
 
   const addHostedImageUrl = useCallback(() => {
@@ -156,23 +165,21 @@ export function useAttachments({
         throw new Error("PDF URLs are not supported. Use an image URL.");
       }
 
-      setPendingImages((current) => {
-        if (current.length >= MAX_CHAT_IMAGES) {
-          throw new Error(
-            `You can attach up to ${MAX_CHAT_IMAGES} images per message.`
-          );
-        }
+      if (pendingImagesRef.current.length >= MAX_CHAT_IMAGES) {
+        throw new Error(
+          `You can attach up to ${MAX_CHAT_IMAGES} images per message.`
+        );
+      }
 
-        return [
-          ...current,
-          {
-            id: uid(),
-            name: parsed.pathname.split("/").pop() || "Hosted image",
-            mimeType: "image/url",
-            url
-          }
-        ];
-      });
+      replacePendingImages([
+        ...pendingImagesRef.current,
+        {
+          id: uid(),
+          name: parsed.pathname.split("/").pop() || "Hosted image",
+          mimeType: "image/url",
+          url
+        }
+      ]);
       setComposerNote("Hosted image URL added to the next message.");
       focusInput();
     } catch (caught) {
@@ -180,7 +187,7 @@ export function useAttachments({
         caught instanceof Error ? caught.message : "That image URL is not valid."
       );
     }
-  }, [focusInput, setComposerNote, setError]);
+  }, [focusInput, replacePendingImages, setComposerNote, setError]);
 
   return {
     pendingImages,

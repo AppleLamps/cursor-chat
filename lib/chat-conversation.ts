@@ -3,6 +3,10 @@ import { DEFAULT_AGENT_MODE, DEFAULT_BRANCH, type AgentMode } from "@/lib/defaul
 import type { Conversation, Message, Role } from "@/lib/chat-types";
 
 export function uid() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 

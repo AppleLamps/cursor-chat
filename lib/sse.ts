@@ -22,6 +22,7 @@ export type ParsedSseEvent = {
 
 export function parseSseBuffer(buffer: string) {
   const events: ParsedSseEvent[] = [];
+  const malformedEvents: string[] = [];
   const parts = buffer.split("\n\n");
   const rest = parts.pop() ?? "";
 
@@ -47,11 +48,11 @@ export function parseSseBuffer(buffer: string) {
         data: JSON.parse(dataLine) as Record<string, unknown>
       });
     } catch {
-      // Ignore malformed SSE chunks.
+      malformedEvents.push(eventName);
     }
   }
 
-  return { events, rest };
+  return { events, malformedEvents, rest };
 }
 
 export function toolActivityLabel(name: string, status: string) {

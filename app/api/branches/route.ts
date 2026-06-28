@@ -4,8 +4,10 @@ import {
   bodyTooLargeResponse,
   checkRateLimit,
   limiterUnavailableResponse,
+  readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
+import { validateRepoUrl } from "@/lib/validate";
 
 type BranchesRequest = {
   repoUrl?: string;
@@ -25,19 +27,17 @@ export async function POST(request: Request) {
     return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 
-  let body: BranchesRequest;
+  const parsedBody = await readJsonBody<BranchesRequest>(request);
+  if (!parsedBody.ok) return parsedBody.response;
 
-  try {
-    body = (await request.json()) as BranchesRequest;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
-  }
+  const body = parsedBody.body;
 
   const repoUrl = body.repoUrl?.trim();
   const githubToken = body.githubToken?.trim();
 
-  if (!repoUrl) {
-    return NextResponse.json({ error: "Repository URL is required." }, { status: 400 });
+  const repoValidation = validateRepoUrl(repoUrl);
+  if (!repoValidation.ok) {
+    return NextResponse.json({ error: repoValidation.error }, { status: 400 });
   }
 
   if (!githubToken) {
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await listGitHubBranches(repoUrl, githubToken);
+    const result = await listGitHubBranches(repoValidation.value.url, githubToken);
 
     return NextResponse.json(result);
   } catch (error) {

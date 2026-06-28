@@ -4,6 +4,7 @@ import {
   bodyTooLargeResponse,
   checkRateLimit,
   limiterUnavailableResponse,
+  readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
 
@@ -24,13 +25,10 @@ export async function POST(request: Request) {
     return rateLimitedResponse(rateLimit.retryAfterSeconds);
   }
 
-  let body: ReposRequest;
+  const parsedBody = await readJsonBody<ReposRequest>(request);
+  if (!parsedBody.ok) return parsedBody.response;
 
-  try {
-    body = (await request.json()) as ReposRequest;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
-  }
+  const body = parsedBody.body;
 
   const apiKey = body.apiKey?.trim();
 

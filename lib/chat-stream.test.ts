@@ -85,4 +85,23 @@ describe("consumeChatStream", () => {
       retryable: false
     } satisfies Partial<ChatStreamError>);
   });
+
+  it("throws when an SSE event contains malformed JSON", async () => {
+    await expect(
+      consumeChatStream(
+        streamResponse([
+          "event: text\ndata: {not-json}\n\n",
+          formatSseEvent("done", {
+            agentId: "agent",
+            runId: "run",
+            status: "finished"
+          })
+        ]),
+        {}
+      )
+    ).rejects.toMatchObject({
+      name: "ChatStreamError",
+      message: "Received malformed chat stream data."
+    } satisfies Partial<ChatStreamError>);
+  });
 });

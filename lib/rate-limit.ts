@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Redis } from "@upstash/redis";
 import { NextResponse } from "next/server";
 
@@ -12,8 +12,10 @@ let redisClient: Redis | null | undefined;
 let memoryActiveStreams = 0;
 
 const REDIS_KEY_PREFIX = "askcursor";
-const CHAT_STREAM_SLOT_KEY = `${REDIS_KEY_PREFIX}:chat:active-streams`;
+const CHAT_STREAM_SLOT_KEY = `${REDIS_KEY_PREFIX}:chat:active-stream-leases`;
 const CHAT_STREAM_SLOT_TTL_SECONDS = 15 * 60;
+const CHAT_STREAM_SLOT_LEASE_MS = 60_000;
+const CHAT_STREAM_SLOT_HEARTBEAT_MS = 20_000;
 const DEFAULT_MAX_ACTIVE_CHAT_STREAMS = 50;
 
 /** Per route defaults. Production uses Redis; local development can use memory. */
@@ -202,6 +204,14 @@ function parseMaxActiveChatStreams() {
     : DEFAULT_MAX_ACTIVE_CHAT_STREAMS;
 }
 
+async function refreshRedisChatSlot(redis: Redis, slotId: string) {
+  await redis.zadd(CHAT_STREAM_SLOT_KEY, {
+    score: Date.now() + CHAT_STREAM_SLOT_LEASE_MS,
+    member: slotId
+  });
+  await redis.expire(CHAT_STREAM_SLOT_KEY, CHAT_STREAM_SLOT_TTL_SECONDS);
+}
+
 export async function claimChatConcurrencySlot(): Promise<ChatConcurrencySlot> {
   const maxActiveStreams = parseMaxActiveChatStreams();
   const redis = getRedisClient();
@@ -226,39 +236,62 @@ export async function claimChatConcurrencySlot(): Promise<ChatConcurrencySlot> {
     };
   }
 
-  let slotIncremented = false;
+  const slotId = randomUUID();
 
   try {
-    const activeStreams = await redis.incr(CHAT_STREAM_SLOT_KEY);
-    slotIncremented = true;
-    await redis.expire(CHAT_STREAM_SLOT_KEY, CHAT_STREAM_SLOT_TTL_SECONDS);
+    const claimed = await redis.eval<[number, number, string, number, number], number>(
+      `
+      redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
+      local active = redis.call("ZCARD", KEYS[1])
+      if active >= tonumber(ARGV[2]) then
+        redis.call("EXPIRE", KEYS[1], ARGV[5])
+        return 0
+      end
+      redis.call("ZADD", KEYS[1], ARGV[4], ARGV[3])
+      redis.call("EXPIRE", KEYS[1], ARGV[5])
+      return 1
+      `,
+      [CHAT_STREAM_SLOT_KEY],
+      [
+        Date.now(),
+        maxActiveStreams,
+        slotId,
+        Date.now() + CHAT_STREAM_SLOT_LEASE_MS,
+        CHAT_STREAM_SLOT_TTL_SECONDS
+      ]
+    );
 
-    if (activeStreams > maxActiveStreams) {
-      await redis.decr(CHAT_STREAM_SLOT_KEY);
-      slotIncremented = false;
+    if (claimed !== 1) {
       return { allowed: false, retryAfterSeconds: 10 };
     }
 
     let released = false;
+    let refreshPromise: Promise<void> | null = null;
+    const heartbeat = setInterval(() => {
+      if (released) return;
+
+      refreshPromise = refreshRedisChatSlot(redis, slotId).catch((error) => {
+        console.error("Failed to refresh chat concurrency slot.", error);
+      });
+    }, CHAT_STREAM_SLOT_HEARTBEAT_MS);
+    heartbeat.unref?.();
 
     return {
       allowed: true,
       release: async () => {
         if (released) return;
         released = true;
+        clearInterval(heartbeat);
 
         try {
-          await redis.decr(CHAT_STREAM_SLOT_KEY);
+          await refreshPromise;
+          await redis.zrem(CHAT_STREAM_SLOT_KEY, slotId);
         } catch (error) {
           console.error("Failed to release chat concurrency slot.", error);
         }
       }
     };
   } catch (error) {
-    if (slotIncremented) {
-      await redis.decr(CHAT_STREAM_SLOT_KEY).catch(() => undefined);
-    }
-
     console.error("Chat concurrency storage is unavailable.", error);
     return { allowed: false, unavailable: true };
   }
@@ -276,6 +309,58 @@ export function bodyTooLargeResponse(
   if (!Number.isFinite(size) || size <= maxBytes) return null;
 
   return NextResponse.json({ error: "Request body is too large." }, { status: 413 });
+}
+
+type ReadJsonBodyResult<T> =
+  | { ok: true; body: T }
+  | { ok: false; response: NextResponse };
+
+function invalidJsonResponse() {
+  return NextResponse.json({ error: "Invalid JSON request body." }, { status: 400 });
+}
+
+export async function readJsonBody<T>(
+  request: Request,
+  maxBytes = MAX_API_BODY_BYTES
+): Promise<ReadJsonBodyResult<T>> {
+  const tooLarge = bodyTooLargeResponse(request, maxBytes);
+  if (tooLarge) return { ok: false, response: tooLarge };
+
+  if (!request.body) {
+    return { ok: false, response: invalidJsonResponse() };
+  }
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let rawBody = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: "Request body is too large." },
+            { status: 413 }
+          )
+        };
+      }
+
+      rawBody += decoder.decode(value, { stream: true });
+    }
+
+    rawBody += decoder.decode();
+
+    return { ok: true, body: JSON.parse(rawBody) as T };
+  } catch {
+    return { ok: false, response: invalidJsonResponse() };
+  }
 }
 
 export function rateLimitedResponse(retryAfterSeconds: number) {

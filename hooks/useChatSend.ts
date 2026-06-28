@@ -77,10 +77,19 @@ export function useChatSend({
   const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   const sendMessage = useCallback(
-    async (content: string, retry = false, baseMessages = messages) => {
+    async (
+      content: string,
+      retry = false,
+      baseMessages = messages,
+      retryAttachments?: Pick<Message, "imageAttachments" | "pdfAttachments">
+    ) => {
       const trimmed = content.trim();
-      const imagesForMessage = retry ? [] : pendingImages;
-      const pdfsForMessage = retry ? [] : pendingPdfs;
+      const imagesForMessage = retry
+        ? retryAttachments?.imageAttachments ?? []
+        : pendingImages;
+      const pdfsForMessage = retry
+        ? retryAttachments?.pdfAttachments ?? []
+        : pendingPdfs;
       const messageContent =
         trimmed ||
         (pdfsForMessage.length > 0
@@ -388,7 +397,10 @@ export function useChatSend({
       if (activeConversation) {
         replaceMessagesForConversation(activeConversation.id, nextMessages);
       }
-      void sendMessage(previousUserMessage.content, true, nextMessages);
+      void sendMessage(previousUserMessage.content, true, nextMessages, {
+        imageAttachments: previousUserMessage.imageAttachments,
+        pdfAttachments: previousUserMessage.pdfAttachments
+      });
     },
     [activeConversation, messages, replaceMessagesForConversation, sendMessage]
   );
@@ -396,9 +408,12 @@ export function useChatSend({
   const retryLast = useCallback(() => {
     const lastUserMessage = [...messages]
       .reverse()
-      .find((message) => message.role === "user")?.content;
+      .find((message) => message.role === "user");
     if (!lastUserMessage) return;
-    void sendMessage(lastUserMessage, true);
+    void sendMessage(lastUserMessage.content, true, messages, {
+      imageAttachments: lastUserMessage.imageAttachments,
+      pdfAttachments: lastUserMessage.pdfAttachments
+    });
   }, [messages, sendMessage]);
 
   const copyMessage = useCallback(async (message: Message) => {

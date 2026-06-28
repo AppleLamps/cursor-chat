@@ -73,6 +73,10 @@ export async function consumeChatStream(
     const parsed = parseSseBuffer(buffer);
     buffer = parsed.rest;
 
+    if (parsed.malformedEvents.length > 0) {
+      throw new ChatStreamError("Received malformed chat stream data.");
+    }
+
     for (const { event, data } of parsed.events) {
       switch (event) {
         case "agent": {
