@@ -123,6 +123,9 @@ Implement mode expects the target repository **not** to use the read-only hooks 
 
 ## Security notes
 
+See [`SECURITY.md`](SECURITY.md) for compliance notes about credential handling
+and privileged agent or browser automation capabilities.
+
 - API keys are sent from the browser to this app's server on repo load and chat requests, then forwarded to Cursor. They are not stored server-side.
 - Optional "remember on this device" stores the key in `localStorage`, which is readable by any script on the page (standard XSS risk).
 - **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account. It is server-gated by confirmation, signed agent sessions, optional allowlists, and protected-branch blocking.
