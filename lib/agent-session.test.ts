@@ -29,7 +29,7 @@ describe("agent session tokens", () => {
     expect(
       verifyAgentSessionToken(token, {
         ...context,
-        modelId: "grok-4.5-high"
+        modelId: "grok-4.5"
       })
     ).toMatchObject({ valid: false });
   });
@@ -44,7 +44,7 @@ describe("agent session tokens", () => {
     expect(
       verifyAgentSessionToken(token, {
         ...context,
-        modelId: "grok-4.5-high"
+        modelId: "grok-4.5"
       })
     ).toMatchObject({ valid: false });
   });
