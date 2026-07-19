@@ -33,4 +33,19 @@ describe("agent session tokens", () => {
       })
     ).toMatchObject({ valid: false });
   });
+
+  it("accepts legacy tokens without a model only for the default model", () => {
+    const token = createAgentSessionToken({
+      ...context,
+      modelId: undefined
+    } as unknown as typeof context);
+
+    expect(verifyAgentSessionToken(token, context)).toEqual({ valid: true });
+    expect(
+      verifyAgentSessionToken(token, {
+        ...context,
+        modelId: "cursor-grok-4.5-high"
+      })
+    ).toMatchObject({ valid: false });
+  });
 });
