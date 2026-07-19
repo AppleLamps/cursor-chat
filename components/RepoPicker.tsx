@@ -385,6 +385,7 @@ function ModeOption({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={onSelect}
       className={`rounded-xl border px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] ${
         selected
