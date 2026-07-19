@@ -18,7 +18,7 @@
 - Collapsible **Sources** panel with GitHub links for files the agent read
 - Persistent local conversation history with cross-tab synchronization, rename, and delete
 - System prompt sent once per conversation (first message only), scaled for simple and complex questions or tasks
-- Selectable Cursor models: `composer-2.5` (default / balanced) and `grok-4.5-high` (higher capability)
+- Selectable Cursor models: `composer-2.5` (default / balanced) and `grok-4.5` (higher capability)
 
 ## Tech Stack
 
@@ -73,7 +73,7 @@ npm run start
 ## How it works
 
 1. The browser stores the user's Cursor API key (optional) and conversation metadata in `localStorage`.
-2. When starting a new chat, the user picks **Ask**, **Plan**, or **Implement** mode and chooses either `composer-2.5` or `grok-4.5-high` in the repository picker. Mode is locked after the first message.
+2. When starting a new chat, the user picks **Ask**, **Plan**, or **Implement** mode and chooses either `composer-2.5` or `grok-4.5` in the repository picker. Mode is locked after the first message.
 3. `POST /api/repos` lists repositories available to that key.
 4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
 5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:

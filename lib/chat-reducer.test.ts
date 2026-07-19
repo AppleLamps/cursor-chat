@@ -51,7 +51,7 @@ describe("conversationReducer", () => {
       id: "next",
       repoUrl: "https://github.com/acme/renamed",
       branch: "release",
-      modelId: "grok-4.5-high"
+      modelId: "grok-4.5"
     });
     current = conversationReducer(current, {
       type: "change-mode",
@@ -64,7 +64,7 @@ describe("conversationReducer", () => {
     expect(updated?.manualTitle).toBe(true);
     expect(updated?.repoUrl).toBe("https://github.com/acme/renamed");
     expect(updated?.branch).toBe("release");
-    expect(updated?.modelId).toBe("grok-4.5-high");
+    expect(updated?.modelId).toBe("grok-4.5");
     expect(updated?.agentId).toBeUndefined();
     expect(updated?.agentSessionToken).toBeUndefined();
     expect(updated?.agentMode).toBe("plan");
@@ -82,10 +82,10 @@ describe("conversationReducer", () => {
     const next = conversationReducer(current, {
       type: "change-model",
       id: "chat",
-      modelId: "grok-4.5-high"
+      modelId: "grok-4.5"
     });
 
-    expect(next.conversations[0].modelId).toBe("grok-4.5-high");
+    expect(next.conversations[0].modelId).toBe("grok-4.5");
     expect(next.conversations[0].agentId).toBeUndefined();
     expect(next.conversations[0].agentSessionToken).toBeUndefined();
   });

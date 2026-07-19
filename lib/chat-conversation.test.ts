@@ -26,7 +26,7 @@ describe("chat conversation helpers", () => {
       "https://github.com/acme/app",
       "main",
       "plan",
-      "grok-4.5-high"
+      "grok-4.5"
     );
 
     expect(conversation.repoUrl).toBe("https://github.com/acme/app");
@@ -35,7 +35,7 @@ describe("chat conversation helpers", () => {
     expect(conversation.modelId).toBe("composer-2.5");
     expect(conversation.messages).toEqual([]);
     expect(planConversation.agentMode).toBe("plan");
-    expect(planConversation.modelId).toBe("grok-4.5-high");
+    expect(planConversation.modelId).toBe("grok-4.5");
   });
 
   it("generates collision-resistant UUID-style ids when available", () => {
@@ -100,17 +100,17 @@ describe("chat conversation helpers", () => {
     const conversation = {
       ...createConversation(),
       agentMode: "plan",
-      modelId: "grok-4.5-high"
+      modelId: "grok-4.5"
     };
     const messages = [userMessage("Plan this")];
 
     expect(normalizeConversation(conversation).agentMode).toBe("plan");
     expect(normalizeConversation(conversation).modelId).toBe(
-      "grok-4.5-high"
+      "grok-4.5"
     );
     expect(withPersistedMessages(conversation, messages).agentMode).toBe("plan");
     expect(withPersistedMessages(conversation, messages).modelId).toBe(
-      "grok-4.5-high"
+      "grok-4.5"
     );
   });
 
