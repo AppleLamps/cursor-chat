@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { AgentMode } from "@/lib/defaults";
+import { DEFAULT_MODEL_ID, type AgentMode, type ModelId } from "@/lib/defaults";
 
 const CONFIGURED_SIGNING_SECRET =
   process.env.ASKCURSOR_AGENT_SESSION_SECRET ||
@@ -23,6 +23,7 @@ type AgentSessionClaims = {
   repoUrl: string;
   branch: string;
   agentMode: AgentMode;
+  modelId?: ModelId;
   apiKeyHash: string;
   expiresAt: number;
 };
@@ -32,6 +33,7 @@ export type AgentSessionContext = {
   repoUrl: string;
   branch: string;
   agentMode: AgentMode;
+  modelId: ModelId;
   apiKey: string;
 };
 
@@ -89,6 +91,7 @@ export function createAgentSessionToken(
     repoUrl: normalizeRepoUrl(context.repoUrl),
     branch: normalizeBranch(context.branch),
     agentMode: context.agentMode,
+    modelId: context.modelId,
     apiKeyHash: apiKeyHash(context.apiKey),
     expiresAt: Date.now() + ttlMs
   };
@@ -129,14 +132,18 @@ export function verifyAgentSessionToken(
     repoUrl: normalizeRepoUrl(expected.repoUrl),
     branch: normalizeBranch(expected.branch),
     agentMode: expected.agentMode,
+    modelId: expected.modelId,
     apiKeyHash: apiKeyHash(expected.apiKey)
   };
+
+  const claimsModelId = claims.modelId ?? DEFAULT_MODEL_ID;
 
   if (
     claims.agentId !== expectedClaims.agentId ||
     claims.repoUrl !== expectedClaims.repoUrl ||
     claims.branch !== expectedClaims.branch ||
     claims.agentMode !== expectedClaims.agentMode ||
+    claimsModelId !== expectedClaims.modelId ||
     claims.apiKeyHash !== expectedClaims.apiKeyHash
   ) {
     return {

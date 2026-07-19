@@ -1,5 +1,12 @@
 import { isImplementMode, isPlanMode, parseAgentMode } from "@/lib/agent-mode";
-import { DEFAULT_AGENT_MODE, DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
+import {
+  DEFAULT_AGENT_MODE,
+  DEFAULT_BRANCH,
+  DEFAULT_MODEL_ID,
+  parseModelId,
+  type AgentMode,
+  type ModelId
+} from "@/lib/defaults";
 import type { Conversation, Message, Role } from "@/lib/chat-types";
 
 export function uid() {
@@ -39,10 +46,17 @@ export function resolveConversationAgentMode(
   return parseAgentMode(conversation?.agentMode);
 }
 
+export function resolveConversationModelId(
+  conversation?: Conversation | null
+): ModelId {
+  return parseModelId(conversation?.modelId);
+}
+
 export function createConversation(
   repoUrl?: string,
   branch?: string,
-  agentMode: AgentMode = DEFAULT_AGENT_MODE
+  agentMode: AgentMode = DEFAULT_AGENT_MODE,
+  modelId: ModelId = DEFAULT_MODEL_ID
 ): Conversation {
   const now = new Date().toISOString();
 
@@ -54,7 +68,8 @@ export function createConversation(
     messages: [],
     repoUrl,
     branch: branch || DEFAULT_BRANCH,
-    agentMode
+    agentMode,
+    modelId
   };
 }
 
@@ -118,7 +133,8 @@ export function isConversation(value: unknown): value is Conversation {
 export function normalizeConversation(conversation: Conversation): Conversation {
   return {
     ...stripPrivateConversationFields(conversation),
-    agentMode: parseAgentMode(conversation.agentMode)
+    agentMode: parseAgentMode(conversation.agentMode),
+    modelId: parseModelId(conversation.modelId)
   };
 }
 
@@ -152,6 +168,7 @@ export function withPersistedMessages(
     manualTitle: conversation.manualTitle,
     repoUrl: conversation.repoUrl,
     branch: conversation.branch,
+    modelId: resolveConversationModelId(conversation),
     agentId:
       nextAgentId === null ? undefined : nextAgentId ?? conversation.agentId,
     agentSessionToken:

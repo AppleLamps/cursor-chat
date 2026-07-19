@@ -1,8 +1,9 @@
-import { DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
+import { DEFAULT_BRANCH, type AgentMode, type ModelId } from "@/lib/defaults";
 import type { Conversation, Message } from "@/lib/chat-types";
 import {
   latestUserMessage,
   resolveConversationAgentMode,
+  resolveConversationModelId,
   sortConversations,
   withPersistedMessages
 } from "@/lib/chat-conversation";
@@ -23,8 +24,15 @@ export type ConversationAction =
   | { type: "create"; conversation: Conversation }
   | { type: "delete"; id: string }
   | { type: "rename"; id: string; title: string }
-  | { type: "change-repo"; id: string; repoUrl: string; branch: string }
+  | {
+      type: "change-repo";
+      id: string;
+      repoUrl: string;
+      branch: string;
+      modelId: ModelId;
+    }
   | { type: "change-mode"; id: string; mode: AgentMode }
+  | { type: "change-model"; id: string; modelId: ModelId }
   | {
       type: "replace-messages";
       conversationId: string;
@@ -114,6 +122,7 @@ export function conversationReducer(
                   ...conversation,
                   repoUrl: action.repoUrl,
                   branch: action.branch,
+                  modelId: action.modelId,
                   agentId: undefined,
                   agentSessionToken: undefined,
                   updatedAt: new Date().toISOString()
@@ -132,6 +141,24 @@ export function conversationReducer(
               ? {
                   ...conversation,
                   agentMode: action.mode,
+                  agentId: undefined,
+                  agentSessionToken: undefined,
+                  updatedAt: new Date().toISOString()
+                }
+              : conversation
+          )
+        )
+      };
+
+    case "change-model":
+      return {
+        ...state,
+        conversations: sortConversations(
+          state.conversations.map((conversation) =>
+            conversation.id === action.id
+              ? {
+                  ...conversation,
+                  modelId: action.modelId,
                   agentId: undefined,
                   agentSessionToken: undefined,
                   updatedAt: new Date().toISOString()
@@ -228,4 +255,8 @@ export function defaultBranchForConversation(conversation?: Conversation | null)
 
 export function agentModeForConversation(conversation?: Conversation | null) {
   return resolveConversationAgentMode(conversation);
+}
+
+export function modelIdForConversation(conversation?: Conversation | null) {
+  return resolveConversationModelId(conversation);
 }

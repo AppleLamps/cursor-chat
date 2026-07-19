@@ -6,7 +6,59 @@ export const DEFAULT_AGENT_MODE: AgentMode = "qa";
 
 export const DEFAULT_BRANCH = "main";
 
-export const CURSOR_MODEL = "composer-2.5";
+export const AVAILABLE_MODELS = [
+  {
+    id: "composer-2.5",
+    label: "Composer 2.5",
+    description: "Default balanced model for everyday repository Q&A and tasks"
+  },
+  {
+    id: "cursor-grok-4.5-high",
+    label: "Grok 4.5 High",
+    description: "Higher-capability model for more demanding codebase work"
+  }
+] as const;
+
+export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
+
+export const DEFAULT_MODEL_ID: ModelId = "composer-2.5";
+
+export function parseModelId(value: unknown): ModelId {
+  const modelId = typeof value === "string" ? value.trim() : "";
+  return (
+    AVAILABLE_MODELS.find((model) => model.id === modelId)?.id ??
+    DEFAULT_MODEL_ID
+  );
+}
+
+export function validateModelId(value: unknown):
+  | { ok: true; value: ModelId }
+  | { ok: false; error: string } {
+  const modelId = typeof value === "string" ? value.trim() : "";
+
+  if (!modelId) {
+    return { ok: true, value: DEFAULT_MODEL_ID };
+  }
+
+  const model = AVAILABLE_MODELS.find((candidate) => candidate.id === modelId);
+
+  if (!model) {
+    return {
+      ok: false,
+      error: `Unsupported model. Choose one of: ${AVAILABLE_MODELS.map(
+        (candidate) => candidate.id
+      ).join(", ")}.`
+    };
+  }
+
+  return { ok: true, value: model.id };
+}
+
+export function modelLabel(modelId: ModelId) {
+  return (
+    AVAILABLE_MODELS.find((model) => model.id === modelId)?.label ?? modelId
+  );
+}
 
 export const BRANCH_PRESETS = [
   "main",

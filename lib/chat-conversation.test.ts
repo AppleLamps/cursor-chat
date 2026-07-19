@@ -25,14 +25,17 @@ describe("chat conversation helpers", () => {
     const planConversation = createConversation(
       "https://github.com/acme/app",
       "main",
-      "plan"
+      "plan",
+      "cursor-grok-4.5-high"
     );
 
     expect(conversation.repoUrl).toBe("https://github.com/acme/app");
     expect(conversation.branch).toBe("main");
     expect(conversation.agentMode).toBe("qa");
+    expect(conversation.modelId).toBe("composer-2.5");
     expect(conversation.messages).toEqual([]);
     expect(planConversation.agentMode).toBe("plan");
+    expect(planConversation.modelId).toBe("cursor-grok-4.5-high");
   });
 
   it("generates collision-resistant UUID-style ids when available", () => {
@@ -76,24 +79,39 @@ describe("chat conversation helpers", () => {
     const conversation = {
       ...createConversation(),
       agentMode: "bad-mode",
+      modelId: "bad-model",
       systemPrompt: "secret"
     } as unknown as Conversation & { systemPrompt: string };
 
     const normalized = normalizeConversation(conversation);
 
     expect(normalized.agentMode).toBe("qa");
+    expect(normalized.modelId).toBe("composer-2.5");
     expect("systemPrompt" in normalized).toBe(false);
   });
 
-  it("preserves plan mode during normalization and persistence", () => {
+  it("hydrates stored conversations without model IDs to the default model", () => {
+    const { modelId: _modelId, ...storedConversation } = createConversation();
+
+    expect(normalizeConversation(storedConversation).modelId).toBe("composer-2.5");
+  });
+
+  it("preserves plan mode and model during normalization and persistence", () => {
     const conversation = {
       ...createConversation(),
-      agentMode: "plan"
+      agentMode: "plan",
+      modelId: "cursor-grok-4.5-high"
     };
     const messages = [userMessage("Plan this")];
 
     expect(normalizeConversation(conversation).agentMode).toBe("plan");
+    expect(normalizeConversation(conversation).modelId).toBe(
+      "cursor-grok-4.5-high"
+    );
     expect(withPersistedMessages(conversation, messages).agentMode).toBe("plan");
+    expect(withPersistedMessages(conversation, messages).modelId).toBe(
+      "cursor-grok-4.5-high"
+    );
   });
 
   it("formats a share transcript with attachment labels", () => {

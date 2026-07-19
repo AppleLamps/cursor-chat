@@ -6,7 +6,7 @@
 
 - BYOK onboarding with optional "remember on this device" storage in browser `localStorage`
 - Optional GitHub personal access token for branch listing (stored locally like the Cursor key)
-- Repository picker backed by `Cursor.repositories.list()` with per-conversation branch selection
+- Repository picker backed by `Cursor.repositories.list()` with per-conversation branch and model selection
 - **Ask mode** (default): read-only Q&A for non-engineers
 - **Plan mode**: read-only implementation planning through the Cursor SDK `mode: "plan"` option
 - **Implement mode** (optional): scoped code changes with automatic pull request creation via `autoCreatePR`
@@ -18,7 +18,7 @@
 - Collapsible **Sources** panel with GitHub links for files the agent read
 - Persistent local conversation history with cross-tab synchronization, rename, and delete
 - System prompt sent once per conversation (first message only), scaled for simple and complex questions or tasks
-- Default model: `composer-2.5` (see `lib/defaults.ts`)
+- Selectable Cursor models: `composer-2.5` (default / balanced) and `cursor-grok-4.5-high` (higher capability)
 
 ## Tech Stack
 
@@ -73,19 +73,19 @@ npm run start
 ## How it works
 
 1. The browser stores the user's Cursor API key (optional) and conversation metadata in `localStorage`.
-2. When starting a new chat, the user picks **Ask**, **Plan**, or **Implement** mode. Mode is locked after the first message.
+2. When starting a new chat, the user picks **Ask**, **Plan**, or **Implement** mode and chooses either `composer-2.5` or `cursor-grok-4.5-high` in the repository picker. Mode is locked after the first message.
 3. `POST /api/repos` lists repositories available to that key.
 4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
 5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:
    - `agent`, `status`, `text`, `thinking`, `tool`, `source`, `done`, `error`
    - `status` and `tool` events are accumulated client-side as an ordered **Agent trace** timeline; `thinking` events are shown as a reasoning summary inside the same panel.
-6. **First message** in a conversation: the server validates mode policy, then `Agent.create()` and `agent.send()` run with the mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
+6. **First message** in a conversation: the server validates mode policy and selected model, then `Agent.create()` and `agent.send()` run with the selected model, mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
    - **Ask mode:** read-only prompt; SDK `mode: "agent"`; `skipReviewerRequest: true`
    - **Plan mode:** read-only planning prompt; SDK `mode: "plan"`; `skipReviewerRequest: true`
    - **Implement mode:** implementation prompt; SDK `mode: "agent"`; `autoCreatePR: true`
 7. **Follow-up messages**: `Agent.resume()` then `agent.send()` with plain user text only and the same SDK mode — the system prompt is not repeated.
 8. The `done` event may include `prUrl` when Implement mode opens a pull request, plus `requestId`, token `usage`, `durationMs`, and `model` telemetry when reported by Cursor.
-9. Each conversation stores a Cursor `agentId` plus a signed server-issued session token so follow-ups keep agent context only for the same API key, repo, branch, and mode.
+9. Each conversation stores a Cursor `agentId` plus a signed server-issued session token so follow-ups keep agent context only for the same API key, repo, branch, mode, and model.
 10. If resume fails because the agent no longer exists, the server starts a fresh cloud agent automatically. Other Cursor SDK errors are surfaced to the client with request/run identifiers when available.
 
 The server is a stateless proxy: it uses the caller's API key for each request and does not persist keys.
@@ -105,7 +105,7 @@ Server-side guardrails in `lib/agent-policy.ts` make Implement mode a privileged
 - Fresh Implement runs require explicit user confirmation in the UI and `implementConfirmed: true` at the API boundary.
 - Protected branches are blocked by default: `main`, `master`, `prod`, `production`, `release`, `release/*`, and `hotfix/*`.
 - Deployments can disable Implement mode or restrict it by owner, repo, and branch with the `ASKCURSOR_IMPLEMENT_*` environment variables documented in `.env.example`.
-- Follow-up runs must present the signed `agentSessionToken` issued with the original `agentId`; mismatched repo, branch, mode, or API key starts are rejected.
+- Follow-up runs must present the signed `agentSessionToken` issued with the original `agentId`; mismatched repo, branch, mode, model, or API key starts are rejected.
 
 ## Read-only enforcement (Ask and Plan modes)
 
@@ -147,7 +147,7 @@ components/
   chat/                   Presentational chat UI components
   ui/                     shadcn-based shared UI primitives
   Onboarding.tsx          API key gate
-  RepoPicker.tsx          Repository, branch, and mode picker
+  RepoPicker.tsx          Repository, branch, mode, and model picker
   SidebarRecents.tsx      Conversation sidebar
 hooks/
   useAuthSettings.ts      Cursor/GitHub token state
@@ -159,7 +159,7 @@ lib/
   chat-stream.ts          SSE consumer (client)
   chat-telemetry.ts       Token usage normalization and formatting
   cursor-prompt.ts        First-message vs follow-up prompt builders
-  defaults.ts             App constants (model, branch presets, prompts)
+  defaults.ts             App constants (models, branch presets, prompts)
   chat-conversation.ts    Conversation helpers
   chat-reducer.ts         Reducer-backed conversation state
   chat-images.ts          Image payload parsing for Cursor SDK
@@ -196,9 +196,9 @@ Usage is billed to each user's Cursor account through normal cloud agent consump
 
 ## Notes
 
-- Conversation history, API keys (optional), default repo, and default chat mode live in browser `localStorage`.
+- Conversation history, API keys (optional), default repo, default chat mode, and default model live in browser `localStorage`.
 - Chat mode is chosen when starting a new chat and cannot be changed after the first message — start a new chat to switch modes.
-- Changing the repository or branch on a thread clears its `agentId` so the next message starts a fresh cloud agent with the system prompt re-sent.
+- Changing the repository, branch, or model on a thread clears its `agentId` so the next message starts a fresh cloud agent with the system prompt re-sent.
 - Failed chat responses clear the stored `agentId` so the next retry can start clean.
 - Completed assistant messages store `runId`, optional `requestId`, duration, model ID, and token usage when Cursor reports them. Share transcripts intentionally omit this telemetry.
 - Assistant messages also store the streamed `activityLog` that powers the Agent trace timeline.
