@@ -13,7 +13,7 @@ export const AVAILABLE_MODELS = [
     description: "Default balanced model for everyday repository Q&A and tasks"
   },
   {
-    id: "cursor-grok-4.5-high",
+    id: "grok-4.5-high",
     label: "Grok 4.5 High",
     description: "Higher-capability model for more demanding codebase work"
   }

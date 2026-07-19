@@ -118,7 +118,7 @@ describe("chat route validation and rate limiting", () => {
   });
 
   it("uses the selected model for first runs", async () => {
-    const agent = mockAgent("cursor-grok-4.5-high");
+    const agent = mockAgent("grok-4.5-high");
     mockedAgentCreate.mockResolvedValue(agent);
 
     const response = await POST(
@@ -127,7 +127,7 @@ describe("chat route validation and rate limiting", () => {
         prompt: "hello",
         repoUrl: "https://github.com/acme/app",
         branch: "main",
-        modelId: "cursor-grok-4.5-high"
+        modelId: "grok-4.5-high"
       })
     );
 
@@ -135,13 +135,13 @@ describe("chat route validation and rate limiting", () => {
 
     expect(mockedAgentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: { id: "cursor-grok-4.5-high" }
+        model: { id: "grok-4.5-high" }
       })
     );
   });
 
   it("uses the selected model for follow-up runs", async () => {
-    const agent = mockAgent("cursor-grok-4.5-high");
+    const agent = mockAgent("grok-4.5-high");
     mockedAgentResume.mockResolvedValue(agent);
     const agentSessionToken = createAgentSessionToken({
       agentId: "agent",
@@ -149,7 +149,7 @@ describe("chat route validation and rate limiting", () => {
       repoUrl: "https://github.com/acme/app",
       branch: "main",
       agentMode: "qa",
-      modelId: "cursor-grok-4.5-high"
+      modelId: "grok-4.5-high"
     });
 
     const response = await POST(
@@ -160,7 +160,7 @@ describe("chat route validation and rate limiting", () => {
         branch: "main",
         agentId: "agent",
         agentSessionToken,
-        modelId: "cursor-grok-4.5-high"
+        modelId: "grok-4.5-high"
       })
     );
 
@@ -169,7 +169,7 @@ describe("chat route validation and rate limiting", () => {
     expect(mockedAgentResume).toHaveBeenCalledWith(
       "agent",
       expect.objectContaining({
-        model: { id: "cursor-grok-4.5-high" }
+        model: { id: "grok-4.5-high" }
       })
     );
   });
