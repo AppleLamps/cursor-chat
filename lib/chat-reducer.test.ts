@@ -33,7 +33,9 @@ describe("conversationReducer", () => {
   it("creates, activates, renames, changes repo, and changes mode", () => {
     const next = {
       ...createConversation("https://github.com/acme/next", "dev", "implement"),
-      id: "next"
+      id: "next",
+      agentId: "agent",
+      agentSessionToken: "token"
     };
     let current = conversationReducer(state(), { type: "create", conversation: next });
 
@@ -48,7 +50,8 @@ describe("conversationReducer", () => {
       type: "change-repo",
       id: "next",
       repoUrl: "https://github.com/acme/renamed",
-      branch: "release"
+      branch: "release",
+      modelId: "cursor-grok-4.5-high"
     });
     current = conversationReducer(current, {
       type: "change-mode",
@@ -61,8 +64,30 @@ describe("conversationReducer", () => {
     expect(updated?.manualTitle).toBe(true);
     expect(updated?.repoUrl).toBe("https://github.com/acme/renamed");
     expect(updated?.branch).toBe("release");
+    expect(updated?.modelId).toBe("cursor-grok-4.5-high");
     expect(updated?.agentId).toBeUndefined();
+    expect(updated?.agentSessionToken).toBeUndefined();
     expect(updated?.agentMode).toBe("plan");
+  });
+
+  it("clears agent session state when the model changes", () => {
+    const current = conversationReducer(state(), {
+      type: "replace-messages",
+      conversationId: "chat",
+      messages: [userMessage, assistantMessage],
+      agentId: "agent",
+      agentSessionToken: "token"
+    });
+
+    const next = conversationReducer(current, {
+      type: "change-model",
+      id: "chat",
+      modelId: "cursor-grok-4.5-high"
+    });
+
+    expect(next.conversations[0].modelId).toBe("cursor-grok-4.5-high");
+    expect(next.conversations[0].agentId).toBeUndefined();
+    expect(next.conversations[0].agentSessionToken).toBeUndefined();
   });
 
   it("persists optimistic, streaming, completion, source, and error transitions", () => {

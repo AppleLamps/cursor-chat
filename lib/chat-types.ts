@@ -1,4 +1,4 @@
-import type { AgentMode } from "@/lib/defaults";
+import type { AgentMode, ModelId } from "@/lib/defaults";
 
 export type Role = "user" | "assistant";
 
@@ -59,6 +59,7 @@ export type Conversation = {
   agentId?: string;
   agentSessionToken?: string;
   agentMode?: AgentMode;
+  modelId?: ModelId;
 };
 
 export type RepoPickerMode = "initial" | "new-chat" | "change";

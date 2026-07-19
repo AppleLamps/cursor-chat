@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
+import { DEFAULT_BRANCH, type AgentMode, type ModelId } from "@/lib/defaults";
 import type { Conversation, Message } from "@/lib/chat-types";
 import {
   createConversation,
@@ -10,6 +10,7 @@ import {
   latestUserMessage,
   normalizeConversation,
   resolveConversationAgentMode,
+  resolveConversationModelId,
   sortConversations
 } from "@/lib/chat-conversation";
 import {
@@ -25,9 +26,11 @@ import {
   STORAGE_KEYS,
   getDefaultAgentMode,
   getDefaultBranch,
+  getDefaultModelId,
   getDefaultRepo,
   setDefaultAgentMode,
   setDefaultBranch,
+  setDefaultModelId,
   setDefaultRepo
 } from "@/lib/storage";
 
@@ -66,6 +69,7 @@ export function useConversationStore({
   const activeConversation = getActiveConversation(state);
   const messages = activeConversation?.messages ?? [];
   const activeAgentMode = resolveConversationAgentMode(activeConversation);
+  const activeModelId = resolveConversationModelId(activeConversation);
   const activeConversationIdRef = useRef(state.activeConversationId);
   activeConversationIdRef.current = state.activeConversationId;
 
@@ -160,7 +164,8 @@ export function useConversationStore({
       conversation: createConversation(
         defaultRepo,
         getDefaultBranch() || DEFAULT_BRANCH,
-        getDefaultAgentMode()
+        getDefaultAgentMode(),
+        getDefaultModelId()
       )
     });
   }, [hasHydrated, apiKey, state.conversations.length]);
@@ -202,8 +207,8 @@ export function useConversationStore({
   }, []);
 
   const updateConversationRepo = useCallback(
-    (id: string, repoUrl: string, branch: string) => {
-      dispatch({ type: "change-repo", id, repoUrl, branch });
+    (id: string, repoUrl: string, branch: string, modelId: ModelId) => {
+      dispatch({ type: "change-repo", id, repoUrl, branch, modelId });
     },
     []
   );
@@ -212,6 +217,14 @@ export function useConversationStore({
     (mode: AgentMode) => {
       if (!activeConversation || messages.length > 0) return;
       dispatch({ type: "change-mode", id: activeConversation.id, mode });
+    },
+    [activeConversation, messages.length]
+  );
+
+  const setActiveConversationModelId = useCallback(
+    (modelId: ModelId) => {
+      if (!activeConversation || messages.length > 0) return;
+      dispatch({ type: "change-model", id: activeConversation.id, modelId });
     },
     [activeConversation, messages.length]
   );
@@ -266,10 +279,16 @@ export function useConversationStore({
   );
 
   const rememberRepoSelection = useCallback(
-    (repoUrl: string, branch: string, agentMode: AgentMode) => {
+    (
+      repoUrl: string,
+      branch: string,
+      agentMode: AgentMode,
+      modelId: ModelId
+    ) => {
       setDefaultRepo(repoUrl);
       setDefaultBranch(branch);
       setDefaultAgentMode(agentMode);
+      setDefaultModelId(modelId);
     },
     []
   );
@@ -286,6 +305,7 @@ export function useConversationStore({
       activeConversationIdRef,
       messages,
       activeAgentMode,
+      activeModelId,
       hasHydrated,
       canChangeAgentMode: messages.length === 0,
       lastUserMessage: latestUserMessage(messages),
@@ -295,6 +315,7 @@ export function useConversationStore({
       activateConversation,
       updateConversationRepo,
       setActiveConversationAgentMode,
+      setActiveConversationModelId,
       deleteConversation,
       renameConversation,
       replaceMessagesForConversation,
@@ -310,11 +331,13 @@ export function useConversationStore({
       activeConversation,
       messages,
       activeAgentMode,
+      activeModelId,
       hasHydrated,
       createAndActivateConversation,
       activateConversation,
       updateConversationRepo,
       setActiveConversationAgentMode,
+      setActiveConversationModelId,
       deleteConversation,
       renameConversation,
       replaceMessagesForConversation,

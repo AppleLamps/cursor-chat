@@ -11,8 +11,12 @@ import {
   buildUserPrompt,
   defaultImagePrompt
 } from "@/lib/cursor-prompt";
-import type { AgentMode } from "@/lib/defaults";
-import { CURSOR_MODEL, DEFAULT_BRANCH } from "@/lib/defaults";
+import {
+  DEFAULT_BRANCH,
+  validateModelId,
+  type AgentMode,
+  type ModelId
+} from "@/lib/defaults";
 import {
   MAX_CHAT_BODY_BYTES,
   chatImagesToSdk,
@@ -44,6 +48,7 @@ type ChatRequest = {
   agentId?: string;
   agentSessionToken?: string;
   agentMode?: AgentMode;
+  modelId?: string;
   implementConfirmed?: boolean;
   images?: Array<{ url?: string; mimeType?: string }>;
 };
@@ -62,6 +67,7 @@ type StreamRunContext = {
   repoUrl: string;
   branch: string;
   agentMode: AgentMode;
+  modelId: ModelId;
   promptText: string;
   sdkImages: ReturnType<typeof chatImagesToSdk>;
   agentId?: string;
@@ -175,6 +181,7 @@ function logCursorFailure({
   runId,
   requestId,
   agentMode,
+  modelId,
   repoUrl,
   branch
 }: {
@@ -184,6 +191,7 @@ function logCursorFailure({
   runId?: string;
   requestId?: string;
   agentMode: AgentMode;
+  modelId: ModelId;
   repoUrl: string;
   branch: string;
 }) {
@@ -194,6 +202,7 @@ function logCursorFailure({
     runId: runId ?? run?.id,
     requestId: requestId ?? (sdkError ? requestIdFrom(sdkError, run) : run?.requestId),
     agentMode,
+    modelId,
     repoUrl,
     branch,
     message: typeof error === "string" ? error : error.message,
@@ -207,7 +216,8 @@ async function createCloudAgent(
   apiKey: string,
   repoUrl: string,
   branch: string,
-  agentMode: AgentMode
+  agentMode: AgentMode,
+  modelId: ModelId
 ) {
   const cloudBase = {
     repos: [{ url: repoUrl, startingRef: branch }]
@@ -215,7 +225,7 @@ async function createCloudAgent(
 
   return Agent.create({
     apiKey,
-    model: { id: CURSOR_MODEL },
+    model: { id: modelId },
     mode: sdkModeForAgentMode(agentMode),
     cloud: isImplementMode(agentMode)
       ? { ...cloudBase, autoCreatePR: true }
@@ -228,17 +238,25 @@ async function startFirstRun({
   repoUrl,
   branch,
   agentMode,
+  modelId,
   promptText,
   sdkImages,
   send
 }: Omit<StreamRunContext, "agentId">) {
-  const agent = await createCloudAgent(apiKey, repoUrl, branch, agentMode);
+  const agent = await createCloudAgent(
+    apiKey,
+    repoUrl,
+    branch,
+    agentMode,
+    modelId
+  );
   const agentSessionToken = createAgentSessionToken({
     agentId: agent.agentId,
     apiKey,
     repoUrl,
     branch,
-    agentMode
+    agentMode,
+    modelId
   });
   send("agent", { agentId: agent.agentId, agentSessionToken });
 
@@ -272,6 +290,7 @@ async function startFollowUpRun({
   repoUrl,
   branch,
   agentMode,
+  modelId,
   promptText,
   sdkImages,
   agentId,
@@ -282,7 +301,7 @@ async function startFollowUpRun({
   try {
     agent = await Agent.resume(agentId!, {
       apiKey,
-      model: { id: CURSOR_MODEL },
+      model: { id: modelId },
       mode: sdkModeForAgentMode(agentMode)
     });
   } catch (resumeError) {
@@ -296,6 +315,7 @@ async function startFollowUpRun({
         repoUrl,
         branch,
         agentMode,
+        modelId,
         promptText,
         sdkImages,
         send
@@ -314,7 +334,8 @@ async function startFollowUpRun({
     apiKey,
     repoUrl,
     branch,
-    agentMode
+    agentMode,
+    modelId
   });
   send("agent", { agentId: agent.agentId, agentSessionToken });
 
@@ -361,8 +382,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: branchValidation.error }, { status: 400 });
   }
 
+  const modelValidation = validateModelId(body.modelId);
+  if (!modelValidation.ok) {
+    return NextResponse.json({ error: modelValidation.error }, { status: 400 });
+  }
+
   const repoUrl = repoValidation.value.url;
   const branch = branchValidation.value;
+  const modelId = modelValidation.value;
   const agentId = body.agentId?.trim();
   const agentSessionToken = body.agentSessionToken?.trim();
 
@@ -388,14 +415,15 @@ export async function POST(request: Request) {
       apiKey,
       repoUrl,
       branch,
-      agentMode
+      agentMode,
+      modelId
     });
 
     if (!session.valid) {
       return NextResponse.json(
         {
           error:
-            "This agent session is no longer valid for the selected repository, branch, and mode. Start a new chat to continue."
+            "This agent session is no longer valid for the selected repository, branch, mode, and model. Start a new chat to continue."
         },
         { status: 409 }
       );
@@ -510,6 +538,7 @@ export async function POST(request: Request) {
           repoUrl,
           branch,
           agentMode,
+          modelId,
           promptText,
           sdkImages,
           agentId,
@@ -543,6 +572,7 @@ export async function POST(request: Request) {
             runId: result.id,
             requestId,
             agentMode,
+            modelId,
             repoUrl,
             branch
           });
@@ -562,6 +592,7 @@ export async function POST(request: Request) {
             runId: result.id,
             requestId,
             agentMode,
+            modelId,
             repoUrl,
             branch
           });
@@ -611,6 +642,7 @@ export async function POST(request: Request) {
             run: currentRun,
             requestId,
             agentMode,
+            modelId,
             repoUrl,
             branch
           });
@@ -633,6 +665,7 @@ export async function POST(request: Request) {
           agentId: resolvedAgentIdForLog,
           run: currentRun,
           agentMode,
+          modelId,
           repoUrl,
           branch
         });

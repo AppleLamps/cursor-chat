@@ -1,6 +1,6 @@
 import { parseAgentMode } from "@/lib/agent-mode";
-import type { AgentMode } from "@/lib/defaults";
-import { DEFAULT_AGENT_MODE } from "@/lib/defaults";
+import type { AgentMode, ModelId } from "@/lib/defaults";
+import { DEFAULT_AGENT_MODE, DEFAULT_MODEL_ID, parseModelId } from "@/lib/defaults";
 
 export const STORAGE_KEYS = {
   API_KEY: "codebase-chat-api-key-v1",
@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   DEFAULT_REPO: "codebase-chat-default-repo-v1",
   DEFAULT_BRANCH: "codebase-chat-default-branch-v1",
   DEFAULT_AGENT_MODE: "codebase-chat-default-agent-mode-v1",
+  DEFAULT_MODEL_ID: "codebase-chat-default-model-id-v1",
   CONVERSATIONS: "codebase-chat-conversations-v1",
   SIDEBAR: "codebase-chat-sidebar-v1"
 } as const;
@@ -114,11 +115,22 @@ export function setDefaultAgentMode(mode: AgentMode) {
   window.localStorage.setItem(STORAGE_KEYS.DEFAULT_AGENT_MODE, mode);
 }
 
+export function getDefaultModelId(): ModelId {
+  if (!isBrowser()) return DEFAULT_MODEL_ID;
+  return parseModelId(window.localStorage.getItem(STORAGE_KEYS.DEFAULT_MODEL_ID));
+}
+
+export function setDefaultModelId(modelId: ModelId) {
+  if (!isBrowser()) return;
+  window.localStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL_ID, modelId);
+}
+
 export function clearDefaultRepoSettings() {
   if (!isBrowser()) return;
   window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_REPO);
   window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_BRANCH);
   window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_AGENT_MODE);
+  window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_MODEL_ID);
 }
 
 export function maskApiKey(key: string) {

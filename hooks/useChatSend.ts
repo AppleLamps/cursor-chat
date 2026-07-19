@@ -17,6 +17,7 @@ import type {
 } from "@/lib/chat-types";
 import {
   conversationTranscript,
+  resolveConversationModelId,
   titleFromMessages,
   uid
 } from "@/lib/chat-conversation";
@@ -123,6 +124,7 @@ export function useChatSend({
       const conversationAgentSessionToken =
         activeConversation.agentSessionToken;
       const conversationAgentMode = activeAgentMode;
+      const conversationModelId = resolveConversationModelId(activeConversation);
 
       if (pdfsForMessage.length > 0) {
         setError("PDF attachments are not supported. Use images or text.");
@@ -225,6 +227,7 @@ export function useChatSend({
             agentId: conversationAgentId,
             agentSessionToken: conversationAgentSessionToken,
             agentMode: conversationAgentMode,
+            modelId: conversationModelId,
             implementConfirmed,
             images: imagesForMessage.map((image) => ({
               url: image.url,

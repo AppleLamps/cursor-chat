@@ -20,12 +20,18 @@ import {
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { createConversation } from "@/lib/chat-conversation";
 import type { Conversation, RepoPickerMode } from "@/lib/chat-types";
-import { DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
+import {
+  DEFAULT_BRANCH,
+  modelLabel,
+  type AgentMode,
+  type ModelId
+} from "@/lib/defaults";
 import { repoLabel } from "@/lib/repo";
 import {
   STORAGE_KEYS,
   getDefaultAgentMode,
   getDefaultBranch,
+  getDefaultModelId,
   getDefaultRepo
 } from "@/lib/storage";
 import { useAttachments } from "@/hooks/useAttachments";
@@ -133,24 +139,26 @@ export default function ChatApp() {
     repoUrl: string,
     branch: string,
     rememberAsDefault: boolean,
-    agentMode: AgentMode
+    agentMode: AgentMode,
+    modelId: ModelId
   ) {
     if (rememberAsDefault) {
-      conversations.rememberRepoSelection(repoUrl, branch, agentMode);
+      conversations.rememberRepoSelection(repoUrl, branch, agentMode, modelId);
     }
 
     if (repoPickerMode === "change" && conversations.activeConversation) {
       conversations.updateConversationRepo(
         conversations.activeConversation.id,
         repoUrl,
-        branch
+        branch,
+        modelId
       );
       setRepoPickerOpen(false);
       chat.setError(null);
       return;
     }
 
-    activateConversation(createConversation(repoUrl, branch, agentMode));
+    activateConversation(createConversation(repoUrl, branch, agentMode, modelId));
     setRepoPickerOpen(false);
     setRepoPickerMode("initial");
     chat.setError(null);
@@ -169,7 +177,12 @@ export default function ChatApp() {
     }
 
     activateConversation(
-      createConversation(repoUrl, branch, conversations.activeAgentMode)
+      createConversation(
+        repoUrl,
+        branch,
+        conversations.activeAgentMode,
+        getDefaultModelId()
+      )
     );
   }
 
@@ -245,10 +258,11 @@ export default function ChatApp() {
     }
   }
 
+  const activeModelLabel = modelLabel(conversations.activeModelId);
   const activeRepoLabel = conversations.activeConversation?.repoUrl
     ? `${repoLabel(conversations.activeConversation.repoUrl)} · ${
         conversations.activeConversation.branch || DEFAULT_BRANCH
-      }`
+      } · ${activeModelLabel}`
     : "Select repository";
   const implementModeNote =
     isImplementMode(conversations.activeAgentMode) &&
@@ -297,6 +311,7 @@ export default function ChatApp() {
         githubToken={auth.githubToken}
         initialBranch={getDefaultBranch() || DEFAULT_BRANCH}
         initialAgentMode={getDefaultAgentMode()}
+        initialModelId={getDefaultModelId()}
         onRetry={() => void repos.loadRepositories(auth.apiKey!)}
         onChangeCredentials={handleSignOut}
         onSelect={handleRepoSelect}
@@ -348,16 +363,21 @@ export default function ChatApp() {
                 ? getDefaultAgentMode()
                 : conversations.activeAgentMode
             }
+            initialModelId={
+              repoPickerMode === "new-chat"
+                ? getDefaultModelId()
+                : conversations.activeModelId
+            }
             allowModeSelection={repoPickerMode !== "change"}
             title={
               repoPickerMode === "new-chat"
                 ? "Start a chat in another repository"
-                : "Change repository"
+                : "Change repository or model"
             }
             description={
               repoPickerMode === "new-chat"
                 ? undefined
-                : "Update which codebase this conversation should use."
+                : "Update which codebase and model this conversation should use."
             }
             submitLabel={repoPickerMode === "new-chat" ? "Start chat" : "Save"}
             onRetry={() => void repos.loadRepositories(auth.apiKey!)}

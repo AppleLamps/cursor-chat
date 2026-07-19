@@ -3,7 +3,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "@/components/BranchPicker";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
-import { APP_NAME, DEFAULT_AGENT_MODE, DEFAULT_BRANCH, type AgentMode } from "@/lib/defaults";
+import {
+  APP_NAME,
+  AVAILABLE_MODELS,
+  DEFAULT_AGENT_MODE,
+  DEFAULT_BRANCH,
+  DEFAULT_MODEL_ID,
+  type AgentMode,
+  type ModelId
+} from "@/lib/defaults";
 import { RepoOption, filterRepos, repoLabel } from "@/lib/repo";
 
 type RepoPickerProps = {
@@ -13,6 +21,7 @@ type RepoPickerProps = {
   initialRepoUrl?: string | null;
   initialBranch?: string;
   initialAgentMode?: AgentMode;
+  initialModelId?: ModelId;
   allowModeSelection?: boolean;
   githubToken?: string | null;
   title?: string;
@@ -25,7 +34,8 @@ type RepoPickerProps = {
     repoUrl: string,
     branch: string,
     rememberAsDefault: boolean,
-    agentMode: AgentMode
+    agentMode: AgentMode,
+    modelId: ModelId
   ) => void;
   onCancel?: () => void;
 };
@@ -37,6 +47,7 @@ export default function RepoPicker({
   initialRepoUrl,
   initialBranch = DEFAULT_BRANCH,
   initialAgentMode = DEFAULT_AGENT_MODE,
+  initialModelId = DEFAULT_MODEL_ID,
   allowModeSelection = true,
   githubToken,
   title = "Choose a repository",
@@ -51,6 +62,7 @@ export default function RepoPicker({
   const [selectedRepoUrl, setSelectedRepoUrl] = useState(initialRepoUrl ?? "");
   const [branch, setBranch] = useState(initialBranch);
   const [agentMode, setAgentMode] = useState<AgentMode>(initialAgentMode);
+  const [modelId, setModelId] = useState<ModelId>(initialModelId);
   const [rememberAsDefault, setRememberAsDefault] = useState(allowModeSelection);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -102,7 +114,7 @@ export default function RepoPicker({
       return;
     }
 
-    onSelect(repoUrl, branchName, rememberAsDefault, agentMode);
+    onSelect(repoUrl, branchName, rememberAsDefault, agentMode, modelId);
   }
 
   const form = (
@@ -253,6 +265,21 @@ export default function RepoPicker({
               ) : null}
             </fieldset>
           ) : null}
+
+          <fieldset className="mt-5">
+            <legend className="text-sm font-medium text-[#333]">Model</legend>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {AVAILABLE_MODELS.map((model) => (
+                <ModeOption
+                  key={model.id}
+                  selected={modelId === model.id}
+                  title={model.label}
+                  description={model.description}
+                  onSelect={() => setModelId(model.id)}
+                />
+              ))}
+            </div>
+          </fieldset>
 
           <BranchPicker
             repoUrl={selectedRepoUrl}
