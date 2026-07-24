@@ -28,11 +28,12 @@ vi.mock("@/lib/rate-limit", async (importOriginal) => {
   };
 });
 
-function chatRequest(body: unknown) {
+function chatRequest(body: unknown, signal?: AbortSignal) {
   return new Request("https://example.test/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
 }
 
@@ -41,7 +42,9 @@ describe("chat route validation and rate limiting", () => {
   const mockedAgentCreate = vi.mocked(Agent.create);
   const mockedAgentResume = vi.mocked(Agent.resume);
 
-  function mockAgent(modelId: string) {
+  function mockAgent(
+    modelId: string
+  ): Awaited<ReturnType<typeof Agent.create>> {
     const run = {
       id: "run",
       agentId: "agent",
@@ -64,7 +67,7 @@ describe("chat route validation and rate limiting", () => {
       agentId: "agent",
       send: vi.fn().mockResolvedValue(run),
       [Symbol.asyncDispose]: vi.fn()
-    };
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>;
   }
 
   beforeEach(() => {
@@ -172,5 +175,47 @@ describe("chat route validation and rate limiting", () => {
         model: { id: "grok-4.5" }
       })
     );
+  });
+
+  it("cancels and disposes the cloud run when the request is aborted", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const dispose = vi.fn().mockResolvedValue(undefined);
+    const run = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      stream: async function* () {
+        await new Promise<void>(() => undefined);
+      },
+      wait: vi.fn(),
+      supports: vi.fn((capability: string) => capability === "cancel"),
+      cancel
+    };
+    const agent = {
+      agentId: "agent",
+      send: vi.fn().mockResolvedValue(run),
+      [Symbol.asyncDispose]: dispose
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>;
+    mockedAgentCreate.mockResolvedValue(agent);
+    const controller = new AbortController();
+
+    const response = await POST(
+      chatRequest(
+        {
+          apiKey: "key",
+          prompt: "hello",
+          repoUrl: "https://github.com/acme/app",
+          branch: "main"
+        },
+        controller.signal
+      )
+    );
+    controller.abort();
+    await response.text();
+
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(dispose).toHaveBeenCalledOnce();
+    });
   });
 });

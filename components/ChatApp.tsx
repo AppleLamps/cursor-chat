@@ -472,6 +472,7 @@ export default function ChatApp() {
               onKeyDown={handleKeyDown}
               canSend={canSend}
               isSending={chat.isSending}
+              onStop={chat.stopGenerating}
               isReadingFiles={attachments.isReadingFiles}
               isListening={voice.isListening}
               note={resolvedComposerNote}

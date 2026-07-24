@@ -39,6 +39,10 @@ import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
 import { validateBranch, validateRepoUrl } from "@/lib/validate";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
+import {
+  terminateAgentRun,
+  type TerminationReason
+} from "@/lib/agent-run-termination";
 
 type ChatRequest = {
   apiKey?: string;
@@ -478,6 +482,7 @@ export async function POST(request: Request) {
       let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
       let currentRun: Run | null = null;
       let resolvedAgentIdForLog = agentId;
+      let terminationPromise: Promise<void> | null = null;
 
       const send = (event: ChatStreamEventName, data: Record<string, unknown>) => {
         if (streamClosed) return;
@@ -503,31 +508,39 @@ export async function POST(request: Request) {
         await agent[Symbol.asyncDispose]();
       };
 
-      const timeoutRun = async () => {
-        send("error", {
-          message: `The Cursor agent run timed out after ${formatTimeoutSeconds(runTimeoutMs)} seconds.`
-        });
-        closeStream();
+      const terminateRun = (reason: TerminationReason) => {
+        if (terminationPromise) return terminationPromise;
 
-        try {
-          if (currentRun?.supports("cancel")) {
-            await currentRun.cancel();
+        if (reason === "timeout") {
+          send("error", {
+            message: `The Cursor agent run timed out after ${formatTimeoutSeconds(runTimeoutMs)} seconds.`
+          });
+        }
+
+        terminationPromise = terminateAgentRun({
+          reason,
+          run: currentRun,
+          closeStream,
+          disposeAgent,
+          releaseSlot,
+          onError(operation, error) {
+            console.error(
+              `Failed to ${operation} ${reason === "abort" ? "aborted" : "timed out"} Cursor agent${operation === "cancel" ? " run" : ""}.`,
+              error
+            );
           }
-        } catch (error) {
-          console.error("Failed to cancel timed out Cursor agent run.", error);
-        }
+        }).then(() => undefined);
 
-        try {
-          await disposeAgent();
-        } catch (error) {
-          console.error("Failed to dispose timed out Cursor agent.", error);
-        }
-
-        await releaseSlot();
+        return terminationPromise;
       };
 
+      const handleRequestAbort = () => {
+        void terminateRun("abort");
+      };
+      request.signal.addEventListener("abort", handleRequestAbort, { once: true });
+
       timeout = setTimeout(() => {
-        void timeoutRun();
+        void terminateRun("timeout");
       }, runTimeoutMs);
 
       try {
@@ -555,6 +568,14 @@ export async function POST(request: Request) {
         const resolvedAgentSessionToken = started.agentSessionToken;
         resolvedAgentIdForLog = resolvedAgentId;
         currentRun = started.run;
+
+        if (request.signal.aborted) {
+          // The request may have been aborted while Agent.create/resume was
+          // still pending, before there was a run available to cancel.
+          terminationPromise = null;
+          await terminateRun("abort");
+          return;
+        }
 
         const streamTelemetry = await streamRunEvents(started.run, send);
 
@@ -676,7 +697,9 @@ export async function POST(request: Request) {
               : "Failed to run the Cursor agent."
         });
       } finally {
+        request.signal.removeEventListener("abort", handleRequestAbort);
         if (timeout) clearTimeout(timeout);
+        await terminationPromise;
         await disposeAgent();
         await releaseSlot();
         closeStream();

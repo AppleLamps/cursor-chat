@@ -24,6 +24,7 @@ import {
 import { copyText } from "@/lib/clipboard";
 import { repoLabel } from "@/lib/repo";
 import { uniqueSortedSources } from "@/lib/sources";
+import { useAgentRequestController } from "@/hooks/useAgentRequestController";
 
 type UseChatSendOptions = {
   apiKey: string | null;
@@ -76,6 +77,12 @@ export function useChatSend({
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const { beginRequest, clearRequest, stopRequest } =
+    useAgentRequestController();
+
+  const stopGenerating = useCallback(() => {
+    if (stopRequest()) setComposerNote("Agent run stopped.");
+  }, [stopRequest]);
 
   const sendMessage = useCallback(
     async (
@@ -214,6 +221,7 @@ export function useChatSend({
         });
       });
       streamBuffer.setActivity(assistantActivity);
+      const requestController = beginRequest();
 
       try {
         const response = await fetch("/api/chat", {
@@ -233,7 +241,8 @@ export function useChatSend({
               url: image.url,
               mimeType: image.mimeType
             }))
-          })
+          }),
+          signal: requestController.signal
         });
 
         const contentType = response.headers.get("content-type") || "";
@@ -338,8 +347,14 @@ export function useChatSend({
           );
         }
       } catch (caught) {
-        const message =
-          caught instanceof Error ? caught.message : "Something went wrong.";
+        const wasAborted =
+          requestController.signal.aborted ||
+          (caught instanceof DOMException && caught.name === "AbortError");
+        const message = wasAborted
+          ? "Agent run stopped."
+          : caught instanceof Error
+            ? caught.message
+            : "Something went wrong.";
         const errorMessage: Message = {
           id: assistantId,
           role: "assistant",
@@ -357,6 +372,7 @@ export function useChatSend({
         }
         replaceMessagesForConversation(conversationId, finalMessages, null, null);
       } finally {
+        clearRequest(requestController);
         setExternalSyncPaused(false);
         setIsSending(false);
         inputRef.current?.focus();
@@ -367,7 +383,9 @@ export function useChatSend({
       activeConversation,
       activeConversationIdRef,
       apiKey,
+      beginRequest,
       clearDraft,
+      clearRequest,
       inputRef,
       isSending,
       mergeSourceForConversation,
@@ -463,6 +481,7 @@ export function useChatSend({
     setComposerNote,
     copiedMessageId,
     shareStatus,
+    stopGenerating,
     sendMessage,
     retryAssistantMessage,
     retryLast,

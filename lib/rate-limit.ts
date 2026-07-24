@@ -205,11 +205,22 @@ function parseMaxActiveChatStreams() {
 }
 
 async function refreshRedisChatSlot(redis: Redis, slotId: string) {
-  await redis.zadd(CHAT_STREAM_SLOT_KEY, {
-    score: Date.now() + CHAT_STREAM_SLOT_LEASE_MS,
-    member: slotId
-  });
-  await redis.expire(CHAT_STREAM_SLOT_KEY, CHAT_STREAM_SLOT_TTL_SECONDS);
+  await redis.eval<[string, number, number], number>(
+    `
+    if not redis.call("ZSCORE", KEYS[1], ARGV[1]) then
+      return 0
+    end
+    redis.call("ZADD", KEYS[1], ARGV[2], ARGV[1])
+    redis.call("EXPIRE", KEYS[1], ARGV[3])
+    return 1
+    `,
+    [CHAT_STREAM_SLOT_KEY],
+    [
+      slotId,
+      Date.now() + CHAT_STREAM_SLOT_LEASE_MS,
+      CHAT_STREAM_SLOT_TTL_SECONDS
+    ]
+  );
 }
 
 export async function claimChatConcurrencySlot(): Promise<ChatConcurrencySlot> {
@@ -266,22 +277,33 @@ export async function claimChatConcurrencySlot(): Promise<ChatConcurrencySlot> {
     }
 
     let released = false;
+    let heartbeat: ReturnType<typeof setTimeout> | undefined;
     let refreshPromise: Promise<void> | null = null;
-    const heartbeat = setInterval(() => {
-      if (released) return;
 
-      refreshPromise = refreshRedisChatSlot(redis, slotId).catch((error) => {
-        console.error("Failed to refresh chat concurrency slot.", error);
-      });
-    }, CHAT_STREAM_SLOT_HEARTBEAT_MS);
-    heartbeat.unref?.();
+    const scheduleHeartbeat = () => {
+      heartbeat = setTimeout(() => {
+        if (released) return;
+
+        refreshPromise = refreshRedisChatSlot(redis, slotId)
+          .catch((error) => {
+            console.error("Failed to refresh chat concurrency slot.", error);
+          })
+          .finally(() => {
+            refreshPromise = null;
+            if (!released) scheduleHeartbeat();
+          });
+      }, CHAT_STREAM_SLOT_HEARTBEAT_MS);
+      heartbeat.unref?.();
+    };
+
+    scheduleHeartbeat();
 
     return {
       allowed: true,
       release: async () => {
         if (released) return;
         released = true;
-        clearInterval(heartbeat);
+        if (heartbeat) clearTimeout(heartbeat);
 
         try {
           await refreshPromise;

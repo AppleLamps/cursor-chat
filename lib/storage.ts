@@ -32,9 +32,10 @@ export function setRememberKey(remember: boolean) {
 }
 
 export function getStoredApiKey(): string | null {
-  if (!isBrowser() || !getRememberKey()) return null;
+  if (!isBrowser()) return null;
 
-  const key = window.localStorage.getItem(STORAGE_KEYS.API_KEY)?.trim();
+  const storage = getRememberKey() ? window.localStorage : window.sessionStorage;
+  const key = storage.getItem(STORAGE_KEYS.API_KEY)?.trim();
   return key || null;
 }
 
@@ -45,11 +46,13 @@ export function persistApiKey(key: string, remember: boolean) {
 
   if (remember) {
     window.localStorage.setItem(STORAGE_KEYS.API_KEY, key.trim());
+    window.sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
     return;
   }
 
   window.localStorage.removeItem(STORAGE_KEYS.API_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
+  window.sessionStorage.setItem(STORAGE_KEYS.API_KEY, key.trim());
 }
 
 export function clearStoredApiKey() {
@@ -57,30 +60,38 @@ export function clearStoredApiKey() {
   window.localStorage.removeItem(STORAGE_KEYS.API_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
   window.localStorage.removeItem(STORAGE_KEYS.REMEMBER_KEY);
+  window.sessionStorage.removeItem(STORAGE_KEYS.API_KEY);
+  window.sessionStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
   clearDefaultRepoSettings();
 }
 
 export function getStoredGitHubToken(): string | null {
-  if (!isBrowser() || !getRememberKey()) return null;
+  if (!isBrowser()) return null;
 
-  const token = window.localStorage.getItem(STORAGE_KEYS.GITHUB_TOKEN)?.trim();
+  const storage = getRememberKey() ? window.localStorage : window.sessionStorage;
+  const token = storage.getItem(STORAGE_KEYS.GITHUB_TOKEN)?.trim();
   return token || null;
 }
 
 export function persistGitHubToken(token: string | null, remember: boolean) {
   if (!isBrowser()) return;
 
-  if (!remember || !token?.trim()) {
+  if (!token?.trim()) {
     window.localStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
+    window.sessionStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
     return;
   }
 
-  window.localStorage.setItem(STORAGE_KEYS.GITHUB_TOKEN, token.trim());
+  const target = remember ? window.localStorage : window.sessionStorage;
+  const other = remember ? window.sessionStorage : window.localStorage;
+  target.setItem(STORAGE_KEYS.GITHUB_TOKEN, token.trim());
+  other.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
 }
 
 export function clearStoredGitHubToken() {
   if (!isBrowser()) return;
   window.localStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
+  window.sessionStorage.removeItem(STORAGE_KEYS.GITHUB_TOKEN);
 }
 
 export function getDefaultRepo(): string | null {

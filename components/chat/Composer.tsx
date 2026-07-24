@@ -33,6 +33,7 @@ export default function Composer({
   onRemoveImage,
   onRemovePdf,
   onToggleVoice,
+  onStop,
   inputRef
 }: {
   value: string;
@@ -52,6 +53,7 @@ export default function Composer({
   onRemoveImage: (id: string) => void;
   onRemovePdf: (id: string) => void;
   onToggleVoice: () => void;
+  onStop: () => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   return (
@@ -153,15 +155,28 @@ export default function Composer({
             >
               {isListening ? <SquareIcon className="fill-current" /> : <MicIcon />}
             </Button>
-            <Button
-              type="submit"
-              size="icon-lg"
-              disabled={!canSend}
-              aria-label="Send message"
-              className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground"
-            >
-              <SendIcon className={isSending ? "animate-pulse" : ""} />
-            </Button>
+            {isSending ? (
+              <Button
+                type="button"
+                size="icon-lg"
+                onClick={onStop}
+                aria-label="Stop generating"
+                title="Stop generating"
+                className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30"
+              >
+                <SquareIcon className="fill-current" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="icon-lg"
+                disabled={!canSend}
+                aria-label="Send message"
+                className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground"
+              >
+                <SendIcon />
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -1,207 +1,260 @@
 # AskCursor
 
-[AskCursor](https://askcursor.app) is a Next.js app for asking questions, planning changes, and running scoped implementation tasks against GitHub repositories. Each user brings their own [Cursor API key](https://cursor.com/dashboard/integrations), picks a connected GitHub repo, and chats with a Cursor cloud agent..
+Ask questions, plan changes, and run scoped implementation tasks against your
+GitHub repositories with Cursor cloud agents.
 
-## Features
+[AskCursor](https://askcursor.app) is a self-hostable Next.js application built
+around a bring-your-own-key model. Users connect a Cursor API key, select one of
+their linked repositories, and work in one of three purpose-built modes:
+read-only Q&A, implementation planning, or guarded code changes with automatic
+pull request creation.
 
-- BYOK onboarding with optional "remember on this device" storage in browser `localStorage`
-- Optional GitHub personal access token for branch listing (stored locally like the Cursor key)
-- Repository picker backed by `Cursor.repositories.list()` with per-conversation branch and model selection
-- **Ask mode** (default): read-only Q&A for non-engineers
-- **Plan mode**: read-only implementation planning through the Cursor SDK `mode: "plan"` option
-- **Implement mode** (optional): scoped code changes with automatic pull request creation via `autoCreatePR`
-- Cursor cloud agents via `@cursor/sdk@1.0.22` (`Agent.create` / `Agent.resume`)
-- Streaming answers over SSE with live tool activity, source discovery, and an expandable **Agent trace** timeline
-- Markdown responses with styled code blocks, one-click copy, shadcn-based chat controls, and **View pull request** links when a PR is opened
-- Quiet per-answer token usage display when Cursor reports usage, plus request IDs in server logs for debugging
-- Image attachments (PNG, JPEG, WebP, GIF — file upload or public URL, up to 5 per message)
-- Collapsible **Sources** panel with GitHub links for files the agent read
-- Persistent local conversation history with cross-tab synchronization, rename, and delete
-- System prompt sent once per conversation (first message only), scaled for simple and complex questions or tasks
-- Selectable Cursor models: `composer-2.5` (default / balanced) and `grok-4.5` (higher capability)
+## Highlights
 
-## Tech Stack
+- **Three workflows:** Ask, Plan, and Implement modes for different levels of
+  access and intent.
+- **Bring your own key:** Cursor credentials are supplied at runtime, kept in
+  session storage by default, and never persisted by the server.
+- **Repository-aware conversations:** Select a repository, branch, and model
+  before starting a chat.
+- **Streaming agent activity:** Follow responses, tool activity, sources, and
+  reasoning summaries in real time over Server-Sent Events.
+- **Guarded implementation:** Explicit confirmation, signed agent sessions,
+  protected-branch rules, and optional deployment allowlists limit write-capable
+  runs.
+- **Rich chat experience:** Markdown, syntax-highlighted code, image
+  attachments, source links, usage telemetry, and persistent local history.
 
-- Next.js App Router
-- React + TypeScript
-- Tailwind CSS
-- shadcn UI primitives via `@shadcn/react`
-- Radix UI, `class-variance-authority`, `clsx`, `tailwind-merge`, and `lucide-react`
-- `@cursor/sdk`
+## Quick start
 
-## Requirements
+### Prerequisites
 
-- Node.js 22.13 or newer
+- [Node.js](https://nodejs.org/) 22.13 or later
 - npm
-- A Cursor account with GitHub repos connected for cloud agents
+- A [Cursor](https://cursor.com/) account with at least one connected GitHub
+  repository
+- A Cursor API key from the
+  [Cursor integrations dashboard](https://cursor.com/dashboard/integrations)
 
-## Environment Variables
+### Run locally
 
-No server-side Cursor API key is required. Users enter their own Cursor API key in the UI.
+```bash
+git clone https://github.com/AppleLamps/cursor-chat.git
+cd cursor-chat
+npm install
+cp .env.example .env.local
+npm run dev
+```
 
-Production deployments must also configure durable request controls and a stable
-agent-session signing secret:
+Open [http://localhost:3000](http://localhost:3000), enter your Cursor API key,
+and choose a repository. The included `.env.example` works as documentation;
+local development does not require Redis or a server-side Cursor key.
 
-- `UPSTASH_REDIS_REST_URL`
-- `UPSTASH_REDIS_REST_TOKEN`
-- `ASKCURSOR_AGENT_SESSION_SECRET`
-- `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS` (optional, defaults to `50`)
+To enable the branch picker, users may also provide a GitHub personal access
+token. The token is sent only to the branch-listing endpoint and is not
+forwarded to Cursor.
+
+### Available commands
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start the local development server |
+| `npm run test` | Run the Vitest test suite |
+| `npm run typecheck` | Validate TypeScript without emitting files |
+| `npm run build` | Create an optimized production build |
+| `npm run start` | Serve the production build |
+
+## Chat modes
+
+| Mode | Intended use | Behavior |
+| --- | --- | --- |
+| **Ask** | Understand a codebase | Read-only investigation and explanation |
+| **Plan** | Design a safe change | Read-only investigation and an implementation-ready plan |
+| **Implement** | Complete a scoped task | May edit code, commit changes, and open a pull request |
+
+The selected mode is fixed after the first message. Start a new conversation to
+switch modes.
+
+Ask and Plan are enforced through mode-specific system prompts and Cursor SDK
+settings. For a stronger repository-level boundary, install the example
+[read-only Cursor hooks](docs/hooks.example.json) in each target repository.
+Prompt instructions alone are not a hard security boundary.
+
+Implement mode is intentionally privileged:
+
+- The user must explicitly confirm the first write-capable run.
+- Protected branches are denied by default, including `main`, `master`,
+  `production`, `release/*`, and `hotfix/*`.
+- Deployments can disable the mode or restrict allowed owners, repositories, and
+  branches.
+- Follow-up requests require a signed session token bound to the API key,
+  repository, branch, mode, and model.
+- The target repository must permit writes through the user's Cursor GitHub
+  integration and must not use the read-only hooks profile.
+
+An optional [Implement-mode hooks example](docs/hooks.implement.example.json)
+provides a lighter repository safety policy while preserving commit and push
+access.
+
+## Core capabilities
+
+- Repository discovery through `Cursor.repositories.list()`
+- Optional GitHub-backed branch discovery
+- Selectable `composer-2.5` and `grok-4.5` models
+- Cursor agent creation and resume through `@cursor/sdk`
+- Automatic recovery when a previous cloud agent no longer exists
+- Streaming text, status, tool, source, and completion events
+- Expandable agent trace with ordered activity and reasoning summaries
+- GitHub source links for files inspected by the agent
+- Pull request links returned by successful Implement runs
+- PNG, JPEG, WebP, and GIF attachments, up to five images per message
+- Local conversation history with rename, delete, and cross-tab synchronization
+- Per-response duration, model, request ID, and token usage when reported by
+  Cursor
+
+## How it works
+
+1. The user enters a Cursor API key and, optionally, a GitHub token.
+2. The browser requests the repositories available to the Cursor account.
+3. The user selects a repository, branch, mode, and model.
+4. The first message creates a Cursor cloud agent with the selected context and
+   the appropriate mode policy.
+5. `/api/chat` streams agent events to the browser over SSE.
+6. The browser stores the returned agent ID and signed session token for
+   validated follow-up requests.
+7. Implement runs may return a pull request URL when Cursor creates one.
+
+The server acts as a stateless credential proxy. Cursor API keys are forwarded
+for each relevant request but are not stored server-side. Conversation history,
+credentials explicitly selected for device storage, defaults, attachments, and
+agent metadata remain in browser storage.
+
+## Configuration
+
+Copy the documented environment template before making deployment-specific
+changes:
 
 ```bash
 cp .env.example .env.local
 ```
 
-The `.env.example` file documents the BYOK model. You do not need these secrets
-for local development; local dev falls back to in-memory request controls.
+### Production requirements
 
-## Development
+Production deployments require durable rate limiting and a stable session
+signing secret:
 
-```bash
-npm install
-npm run dev
+```dotenv
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+ASKCURSOR_AGENT_SESSION_SECRET=
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+`AUTH_SECRET` or `NEXTAUTH_SECRET` may be used as the signing-secret fallback.
+Without a configured secret, production builds fail closed. Local development
+uses an in-memory rate limiter and a per-process signing secret by default.
 
-Build for production:
+Generate a suitable signing secret with:
 
 ```bash
-npm run build
-npm run start
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-## How it works
+### Optional controls
 
-1. The browser stores the user's Cursor API key (optional) and conversation metadata in `localStorage`.
-2. When starting a new chat, the user picks **Ask**, **Plan**, or **Implement** mode and chooses either `composer-2.5` or `grok-4.5` in the repository picker. Mode is locked after the first message.
-3. `POST /api/repos` lists repositories available to that key.
-4. `POST /api/branches` lists branches for a selected repo when a GitHub token is provided.
-5. `POST /api/chat` creates or resumes a cloud agent against the selected repo and branch, then streams SSE events:
-   - `agent`, `status`, `text`, `thinking`, `tool`, `source`, `done`, `error`
-   - `status` and `tool` events are accumulated client-side as an ordered **Agent trace** timeline; `thinking` events are shown as a reasoning summary inside the same panel.
-6. **First message** in a conversation: the server validates mode policy and selected model, then `Agent.create()` and `agent.send()` run with the selected model, mode-specific system prompt, repo/branch context, and the user's message combined in one payload (`buildFirstAgentMessage()` in `lib/cursor-prompt.ts`).
-   - **Ask mode:** read-only prompt; SDK `mode: "agent"`; `skipReviewerRequest: true`
-   - **Plan mode:** read-only planning prompt; SDK `mode: "plan"`; `skipReviewerRequest: true`
-   - **Implement mode:** implementation prompt; SDK `mode: "agent"`; `autoCreatePR: true`
-7. **Follow-up messages**: `Agent.resume()` then `agent.send()` with plain user text only and the same SDK mode — the system prompt is not repeated.
-8. The `done` event may include `prUrl` when Implement mode opens a pull request, plus `requestId`, token `usage`, `durationMs`, and `model` telemetry when reported by Cursor.
-9. Each conversation stores a Cursor `agentId` plus a signed server-issued session token so follow-ups keep agent context only for the same API key, repo, branch, mode, and model.
-10. If resume fails because the agent no longer exists, the server starts a fresh cloud agent automatically. Other Cursor SDK errors are surfaced to the client with request/run identifiers when available.
+| Variable | Purpose |
+| --- | --- |
+| `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS` | Maximum concurrent chat streams; defaults to `50` |
+| `ASKCURSOR_ENABLE_IMPLEMENT_MODE` | Set to `false` to disable Implement mode |
+| `ASKCURSOR_IMPLEMENT_ALLOWED_OWNERS` | Comma-separated owner allowlist |
+| `ASKCURSOR_IMPLEMENT_ALLOWED_REPOS` | Comma-separated repository allowlist |
+| `ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES` | Comma-separated branch allowlist |
+| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Override the default protected-branch patterns |
+| `ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES` | Set to `true` to permit protected branches |
 
-The server is a stateless proxy: it uses the caller's API key for each request and does not persist keys.
+Allowlist values support `*` wildcards. See [.env.example](.env.example) for
+configuration notes and examples.
 
-## Chat modes
-
-| Mode | Use case | Agent behavior |
-|------|----------|----------------|
-| **Ask** | PMs, support, compliance — understand the codebase | Read-only investigation and explanation |
-| **Plan** | Engineers and operators — plan a safe change before implementation | Read-only investigation plus a decision-complete implementation plan |
-| **Implement** | Small scoped fixes, docs updates, tests | Edit code, commit, open a PR |
-
-Implement mode requires write access to the target repo through the user's Cursor GitHub integration. Organization policies may block cloud agent pushes.
-
-Server-side guardrails in `lib/agent-policy.ts` make Implement mode a privileged path:
-
-- Fresh Implement runs require explicit user confirmation in the UI and `implementConfirmed: true` at the API boundary.
-- Protected branches are blocked by default: `main`, `master`, `prod`, `production`, `release`, `release/*`, and `hotfix/*`.
-- Deployments can disable Implement mode or restrict it by owner, repo, and branch with the `ASKCURSOR_IMPLEMENT_*` environment variables documented in `.env.example`.
-- Follow-up runs must present the signed `agentSessionToken` issued with the original `agentId`; mismatched repo, branch, mode, model, or API key starts are rejected.
-
-## Read-only enforcement (Ask and Plan modes)
-
-Ask and Plan modes use layered read-only controls:
-
-1. **System prompt** — Ask uses `lib/system-prompt.ts`; Plan uses `lib/plan-prompt.ts`. Both are sent on the **first message only** via `buildFirstAgentMessage()` and explicitly forbid edits, commits, pull requests, and mutating commands.
-2. **SDK mode** — Plan mode passes `mode: "plan"` to `Agent.create()` / `agent.send()`. Ask and Implement use SDK `mode: "agent"` with app-specific prompts and cloud options.
-3. **Repo hooks** — add `.cursor/hooks.json` in the **target repository** for hard enforcement. See [`docs/hooks.example.json`](docs/hooks.example.json). Production deployments should require these hooks for repositories that are used in Ask or Plan mode, because prompt instructions alone are not a hard security boundary.
-
-The example hooks block destructive shell commands and git mutations. MCP tools are still allowed — tighten `beforeMCPExecution` in the target repo if needed.
-
-## Implement mode and repo hooks
-
-Implement mode expects the target repository **not** to use the read-only hooks profile. Optionally add [`docs/hooks.implement.example.json`](docs/hooks.implement.example.json) for a lighter safety net that still allows git commit/push.
-
-## Security notes
-
-See [`SECURITY.md`](SECURITY.md) for compliance notes about credential handling
-and privileged agent or browser automation capabilities.
-
-- API keys are sent from the browser to this app's server on repo load and chat requests, then forwarded to Cursor. They are not stored server-side.
-- Optional "remember on this device" stores the key in `localStorage`, which is readable by any script on the page (standard XSS risk).
-- **Implement mode writes to the repository** and opens pull requests billed to the user's Cursor account. It is server-gated by confirmation, signed agent sessions, optional allowlists, and protected-branch blocking.
-- **Rate limiting:** durable Redis-backed limits on `/api/chat` (12/min Ask or Plan, 6/min Implement), `/api/repos` (30/min), and `/api/branches` (60/min). Chat also limits by Cursor API key hash and caps active streams with `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS`. In production, missing or unavailable Redis request controls fail closed with `503`.
-- **Session signing:** production requires `ASKCURSOR_AGENT_SESSION_SECRET` (or `AUTH_SECRET` / `NEXTAUTH_SECRET`) so signed agent resume tokens survive deploys and cold starts.
-- **Repository input:** chat requests only accept normalized `https://github.com/{owner}/{repo}` URLs and valid Git branch/ref names before calling the Cursor SDK.
-- **Request tracing:** server logs include Cursor `requestId`, `runId`, agent mode, repo, branch, SDK code/status, and retryability for failed runs. Logs must not include API keys or prompt bodies.
-- Ensure hosting logs do not capture request bodies containing API keys.
-
-## Project Structure
+## Architecture
 
 ```text
 app/
-  api/chat/route.ts       Cursor SDK streaming route (create/resume + SSE)
-  api/repos/route.ts      Repository listing route
-  api/branches/route.ts   GitHub branch listing route
+  api/
+    branches/route.ts        GitHub branch discovery
+    chat/route.ts            Cursor agent lifecycle and SSE streaming
+    repos/route.ts           Cursor repository discovery
 components/
-  ChatApp.tsx             Chat shell and hook wiring
-  chat/                   Presentational chat UI components
-  ui/                     shadcn-based shared UI primitives
-  Onboarding.tsx          API key gate
-  RepoPicker.tsx          Repository, branch, mode, and model picker
-  SidebarRecents.tsx      Conversation sidebar
+  chat/                      Chat interface and message presentation
+  ChatApp.tsx                Application shell and chat orchestration
+  Onboarding.tsx             Runtime credential onboarding
+  RepoPicker.tsx             Repository, branch, mode, and model selection
 hooks/
-  useAuthSettings.ts      Cursor/GitHub token state
-  useChatSend.ts          Send/retry/share orchestration
-  useConversationStore.ts Conversation reducer, persistence, cross-tab sync
-  useAttachments.ts      File/image attachment state
+  useAuthSettings.ts         Local credential preferences
+  useChatSend.ts             Send, retry, and share orchestration
+  useConversationStore.ts    Persistent conversation state
 lib/
-  agent-mode.ts           AgentMode parsing helpers
-  chat-stream.ts          SSE consumer (client)
-  chat-telemetry.ts       Token usage normalization and formatting
-  cursor-prompt.ts        First-message vs follow-up prompt builders
-  defaults.ts             App constants (models, branch presets, prompts)
-  chat-conversation.ts    Conversation helpers
-  chat-reducer.ts         Reducer-backed conversation state
-  chat-images.ts          Image payload parsing for Cursor SDK
-  chat-types.ts           Shared chat domain types
-  github.ts               GitHub branch API helpers
-  implement-prompt.ts     Implement-mode system prompt
-  plan-prompt.ts          Plan-mode system prompt
-  repo.ts                 Repository fetch helpers
-  sources.ts              Source path extraction + GitHub links
-  sse.ts                  SSE event types and formatting
-  stream-buffer.ts        Streaming text buffer utilities
-  thinking.ts             Thinking text extraction and merge helpers
-  rate-limit.ts           Redis/in-memory rate limits, body guard, concurrency slots
-  storage.ts              Browser localStorage helpers
-  system-prompt.ts        Read-only codebase Q&A instructions
+  agent-policy.ts            Implement-mode authorization rules
+  agent-session.ts           Signed agent resume sessions
+  cursor-prompt.ts           First-message and follow-up payloads
+  rate-limit.ts              Rate limits, body guards, and stream slots
+  sse.ts                     Streaming event definitions
+  system-prompt.ts           Ask-mode policy
+  plan-prompt.ts             Plan-mode policy
+  implement-prompt.ts        Implement-mode policy
 docs/
-  hooks.example.json           Read-only hooks for Ask mode target repos
-  hooks.implement.example.json Optional lighter hooks for Implement mode
+  hooks.example.json         Read-only target-repository hooks
+  hooks.implement.example.json
+                              Write-capable safety hooks
 ```
+
+The interface is built with Next.js App Router, React, TypeScript, Tailwind CSS,
+shadcn components, Radix UI primitives, and the Cursor SDK. Upstash Redis backs
+production request controls.
+
+## Security
+
+AskCursor handles user-supplied credentials and can launch write-capable cloud
+agents. Review [SECURITY.md](SECURITY.md) before deploying it.
+
+Key operational considerations:
+
+- Cursor API keys and optional GitHub tokens pass through the application server
+  but are not persisted there.
+- Credentials use `sessionStorage` by default. Choosing **Remember on this
+  device** stores them in `localStorage`,
+  which carries the usual cross-site scripting risk.
+- Hosting and observability systems must not log request bodies containing
+  credentials or prompts.
+- Production rate limits use Redis and fail closed when durable request controls
+  are unavailable.
+- Implement mode should be restricted to approved repositories and non-protected
+  branches.
+- Browser or agent environments with privileged automation capabilities require
+  an additional security and privacy review.
+
+Current application limits are 12 Ask or Plan chat requests per minute, 6
+Implement requests per minute, 30 repository requests per minute, and 60 branch
+requests per minute. Chat concurrency is also capped deployment-wide.
 
 ## Deployment
 
-Deploy like any Next.js app (for example on Vercel). No server-side Cursor API
-key is required, but production request controls and session signing need
-environment variables.
+AskCursor can be deployed as a standard Next.js application, including on
+[Vercel](https://vercel.com/):
 
-1. Push the repository to GitHub.
-2. Import the project in your hosting provider.
-3. Configure `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and `ASKCURSOR_AGENT_SESSION_SECRET`.
-4. Point [askcursor.app](https://askcursor.app) at your deployment.
-5. Users connect by pasting their own Cursor API key at runtime.
+1. Fork or push this repository to GitHub.
+2. Import it into the hosting provider.
+3. Configure the required production environment variables.
+4. Deploy and point your domain at the application.
+5. Have each user connect their own Cursor API key at runtime.
 
-Usage is billed to each user's Cursor account through normal cloud agent consumption.
+No shared server-side Cursor key is required. Cursor cloud-agent usage is billed
+to the account associated with each user's key.
 
-## Notes
+## Limitations
 
-- Conversation history, API keys (optional), default repo, default chat mode, and default model live in browser `localStorage`.
-- Chat mode is chosen when starting a new chat and cannot be changed after the first message — start a new chat to switch modes.
-- Changing the repository, branch, or model on a thread clears its `agentId` so the next message starts a fresh cloud agent with the system prompt re-sent.
-- Failed chat responses clear the stored `agentId` so the next retry can start clean.
-- Completed assistant messages store `runId`, optional `requestId`, duration, model ID, and token usage when Cursor reports them. Share transcripts intentionally omit this telemetry.
-- Assistant messages also store the streamed `activityLog` that powers the Agent trace timeline.
-- Text-only or image+text chat (up to 5 images per message via Cursor SDK).
 - PDF attachments are not supported.
-- GitHub token is only used to list branches via `/api/branches`; it is not sent to Cursor.
+- Image attachments must be PNG, JPEG, WebP, or GIF.
+- The GitHub token is used only for branch listing.
+- Mode changes require a new conversation.
+- Changing the repository, branch, or model resets the cloud-agent context.
+- Read-only prompts should be paired with repository hooks when hard enforcement
+  is required.
