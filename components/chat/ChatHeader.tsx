@@ -72,8 +72,12 @@ export default function ChatHeader({
           New chat
         </Button>
         <div className="hidden min-w-0 items-center gap-2 md:flex">
-          <p className="truncate text-sm font-semibold text-foreground">{APP_NAME}</p>
-          <span className="text-border">/</span>
+          {!sidebarOpen ? (
+            <>
+              <p className="truncate text-sm font-semibold text-foreground">{APP_NAME}</p>
+              <span className="text-border">/</span>
+            </>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
@@ -140,7 +144,7 @@ export default function ChatHeader({
           variant="ghost"
           size="sm"
           onClick={onReset}
-          className="hidden sm:inline-flex"
+          className={sidebarOpen ? "hidden" : "hidden sm:inline-flex"}
         >
           New chat
         </Button>

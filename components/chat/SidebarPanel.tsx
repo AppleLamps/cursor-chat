@@ -42,6 +42,7 @@ export default function SidebarPanel({
   const [showGitHubForm, setShowGitHubForm] = useState(false);
   const [githubInput, setGithubInput] = useState("");
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function handleSaveGitHub(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -102,124 +103,158 @@ export default function SidebarPanel({
       </div>
 
       <div className="mt-auto border-t border-[#ececec] pt-3">
-        <div className="rounded-xl border border-[#ececec] bg-[#fafafa] p-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#8a8a8a]">
-            Settings
-          </p>
+        <SidebarButton
+          label="Settings"
+          icon={<IconSettings />}
+          onClick={() => setSettingsOpen(true)}
+        />
+      </div>
 
-          {defaultRepoLabel ? (
-            <div className="mt-3">
-              <div className="flex items-start gap-2.5">
-                <SidebarIcon>
-                  <IconFolder />
-                </SidebarIcon>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-[#8a8a8a]">Default repository</p>
-                  <p
-                    className="mt-0.5 truncate text-sm text-[#303030]"
-                    title={defaultRepoLabel}
-                  >
-                    {defaultRepoLabel}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
+      {settingsOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+          <button
+            type="button"
+            aria-label="Close settings"
+            className="absolute inset-0 bg-black/25"
+            onClick={() => setSettingsOpen(false)}
+          />
           <div
-            className={
-              defaultRepoLabel ? "mt-3 border-t border-[#ececec] pt-3" : "mt-3"
-            }
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            className="relative z-10 max-h-full w-full max-w-md overflow-y-auto rounded-2xl border border-[#d9d9d9] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
           >
-            <div className="flex items-start gap-2.5">
-              <SidebarIcon>
-                <IconGitHub />
-              </SidebarIcon>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-[#8a8a8a]">GitHub token</p>
-                {githubToken ? (
-                  <p
-                    className="mt-0.5 truncate font-mono text-sm text-[#303030]"
-                    title="Connected GitHub token"
-                  >
-                    {maskApiKey(githubToken)}
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-sm text-[#303030]">Not connected</p>
-                )}
-              </div>
-            </div>
-
-            {githubToken ? (
-              <SettingsAction
-                label="Clear GitHub token"
-                icon={<IconKeyOff />}
-                onClick={onClearGitHubToken}
-              />
-            ) : showGitHubForm ? (
-              <form onSubmit={handleSaveGitHub} className="mt-2 space-y-2">
-                <input
-                  type="password"
-                  value={githubInput}
-                  onChange={(event) => setGithubInput(event.target.value)}
-                  placeholder="ghp_... or github_pat_..."
-                  className="w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
-                />
-                {githubError ? (
-                  <p className="text-xs text-red-700">{githubError}</p>
-                ) : null}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowGitHubForm(false);
-                      setGithubInput("");
-                      setGithubError(null);
-                    }}
-                    className="rounded-full border border-[#d9d9d9] px-3 py-1.5 text-xs font-medium text-[#444] transition hover:bg-[#f7f7f8]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-full bg-[#0d0d0d] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#303030]"
-                  >
-                    Save token
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <SettingsAction
-                label="Add GitHub token"
-                icon={<IconGitHub className="h-4 w-4" />}
-                onClick={() => setShowGitHubForm(true)}
-              />
-            )}
-          </div>
-
-          <div className="mt-3 border-t border-[#ececec] pt-3">
-            <div className="flex items-start gap-2.5">
-              <SidebarIcon>
-                <IconKey />
-              </SidebarIcon>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-[#8a8a8a]">Cursor API key</p>
-                <p
-                  className="mt-0.5 truncate font-mono text-sm text-[#303030]"
-                  title="Connected API key"
-                >
-                  {maskApiKey(apiKey)}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 id="settings-title" className="text-lg font-semibold text-[#202123]">
+                  Settings
+                </h2>
+                <p className="mt-1 text-sm text-[#5f6368]">
+                  Repository defaults and connected credentials.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xl text-[#666] transition hover:bg-[#f1f1f1] hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+                aria-label="Close settings"
+              >
+                ×
+              </button>
             </div>
-            <SettingsAction
-              label="Clear saved key"
-              icon={<IconKeyOff />}
-              onClick={onSignOut}
-            />
+
+            <div className="mt-5 divide-y divide-[#ececec] rounded-xl border border-[#ececec] bg-[#fafafa] px-4">
+              {defaultRepoLabel ? (
+                <div className="py-4">
+                  <div className="flex items-start gap-2.5">
+                    <SidebarIcon>
+                      <IconFolder />
+                    </SidebarIcon>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-[#8a8a8a]">Default repository</p>
+                      <p
+                        className="mt-0.5 truncate text-sm text-[#303030]"
+                        title={defaultRepoLabel}
+                      >
+                        {defaultRepoLabel}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="py-4">
+                <div className="flex items-start gap-2.5">
+                  <SidebarIcon>
+                    <IconGitHub />
+                  </SidebarIcon>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-[#8a8a8a]">GitHub token</p>
+                    {githubToken ? (
+                      <p
+                        className="mt-0.5 truncate font-mono text-sm text-[#303030]"
+                        title="Connected GitHub token"
+                      >
+                        {maskApiKey(githubToken)}
+                      </p>
+                    ) : (
+                      <p className="mt-0.5 text-sm text-[#303030]">Not connected</p>
+                    )}
+                  </div>
+                </div>
+
+                {githubToken ? (
+                  <SettingsAction
+                    label="Clear GitHub token"
+                    icon={<IconKeyOff />}
+                    onClick={onClearGitHubToken}
+                  />
+                ) : showGitHubForm ? (
+                  <form onSubmit={handleSaveGitHub} className="mt-2 space-y-2">
+                    <input
+                      type="password"
+                      value={githubInput}
+                      onChange={(event) => setGithubInput(event.target.value)}
+                      placeholder="ghp_... or github_pat_..."
+                      className="w-full rounded-lg border border-[#d9d9d9] bg-white px-3 py-2 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
+                    />
+                    {githubError ? (
+                      <p className="text-xs text-red-700">{githubError}</p>
+                    ) : null}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowGitHubForm(false);
+                          setGithubInput("");
+                          setGithubError(null);
+                        }}
+                        className="rounded-full border border-[#d9d9d9] px-3 py-1.5 text-xs font-medium text-[#444] transition hover:bg-[#f7f7f8]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded-full bg-[#0d0d0d] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#303030]"
+                      >
+                        Save token
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <SettingsAction
+                    label="Add GitHub token"
+                    icon={<IconGitHub className="h-4 w-4" />}
+                    onClick={() => setShowGitHubForm(true)}
+                  />
+                )}
+              </div>
+
+              <div className="py-4">
+                <div className="flex items-start gap-2.5">
+                  <SidebarIcon>
+                    <IconKey />
+                  </SidebarIcon>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-[#8a8a8a]">Cursor API key</p>
+                    <p
+                      className="mt-0.5 truncate font-mono text-sm text-[#303030]"
+                      title="Connected API key"
+                    >
+                      {maskApiKey(apiKey)}
+                    </p>
+                  </div>
+                </div>
+                <SettingsAction
+                  label="Clear saved key"
+                  icon={<IconKeyOff />}
+                  onClick={onSignOut}
+                />
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -394,6 +429,24 @@ function IconSwitch({ className = "h-4 w-4" }: { className?: string }) {
       <path d="M8 21H3v-5" />
       <path d="M21 3 14 10" />
       <path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
+function IconSettings({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.36.35.7.6 1 .3.28.7.43 1.1.4H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51.6Z" />
     </svg>
   );
 }

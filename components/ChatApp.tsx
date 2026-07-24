@@ -275,6 +275,7 @@ export default function ChatApp() {
       ? "Plan mode inspects the repo and stays read-only."
       : null;
   const resolvedComposerNote = chat.composerNote ?? implementModeNote ?? planModeNote;
+  const hasMessages = conversations.messages.length > 0;
   const canSend =
     (input.trim().length > 0 ||
       attachments.pendingImages.length > 0 ||
@@ -288,6 +289,57 @@ export default function ChatApp() {
       !repoPickerOpen
   );
   const defaultRepoLabel = getDefaultRepo() ? repoLabel(getDefaultRepo()!) : null;
+  const composer = (
+    <>
+      {chat.error && (
+        <ErrorBanner
+          message={chat.error}
+          canRetry={
+            Boolean(conversations.lastUserMessage) ||
+            conversations.lastAssistantErrored
+          }
+          onRetry={chat.retryLast}
+        />
+      )}
+      <Composer
+        value={input}
+        images={attachments.pendingImages}
+        pdfs={attachments.pendingPdfs}
+        onChange={setInput}
+        onSubmit={handleSubmit}
+        onKeyDown={handleKeyDown}
+        canSend={canSend}
+        isSending={chat.isSending}
+        onStop={chat.stopGenerating}
+        isReadingFiles={attachments.isReadingFiles}
+        isListening={voice.isListening}
+        note={resolvedComposerNote}
+        placeholder={
+          isImplementMode(conversations.activeAgentMode)
+            ? "Describe the change you want"
+            : isPlanMode(conversations.activeAgentMode)
+              ? "Describe what you want planned"
+              : "Ask about this repository"
+        }
+        onAttachClick={() => fileInputRef.current?.click()}
+        onHostedImageClick={attachments.addHostedImageUrl}
+        onRemoveImage={attachments.removePendingImage}
+        onRemovePdf={attachments.removePendingPdf}
+        onToggleVoice={voice.toggleVoiceInput}
+        inputRef={inputRef}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        aria-label="Attach images"
+        title="Attach images"
+        className="hidden"
+        multiple
+        accept="image/gif,image/jpeg,image/png,image/webp"
+        onChange={(event) => void handleFileInput(event.target.files)}
+      />
+    </>
+  );
 
   if (!auth.hasAuthHydrated || !conversations.hasHydrated) {
     return (
@@ -407,26 +459,29 @@ export default function ChatApp() {
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
         />
 
-        <MessageScrollerProvider
-          autoScroll
-          defaultScrollPosition="end"
-          scrollEdgeThreshold={48}
-          scrollPreviousItemPeek={96}
-        >
-          <MessageScroller className="flex-1">
-            <MessageScrollerViewport className="px-4 pb-52 pt-8 sm:px-6 sm:pb-44">
-              {conversations.messages.length === 0 ? (
-                <MessageScrollerContent className="min-h-full">
-                  <EmptyState
-                    agentMode={conversations.activeAgentMode}
-                    onAgentModeChange={conversations.setActiveConversationAgentMode}
-                    onPick={(prompt) => {
-                      setInput(prompt);
-                      inputRef.current?.focus();
-                    }}
-                  />
-                </MessageScrollerContent>
-              ) : (
+        {!hasMessages ? (
+          <div className="flex min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6">
+            <div className="m-auto w-full max-w-3xl space-y-8 py-4 sm:space-y-10">
+              <EmptyState
+                agentMode={conversations.activeAgentMode}
+                onPick={(prompt) => {
+                  setInput(prompt);
+                  inputRef.current?.focus();
+                }}
+              />
+              {composer}
+            </div>
+          </div>
+        ) : (
+          <>
+            <MessageScrollerProvider
+              autoScroll
+              defaultScrollPosition="end"
+              scrollEdgeThreshold={48}
+              scrollPreviousItemPeek={96}
+            >
+              <MessageScroller className="flex-1">
+                <MessageScrollerViewport className="px-4 pb-52 pt-8 sm:px-6 sm:pb-44">
                 <MessageScrollerContent className="mx-auto max-w-3xl gap-6">
                   {conversations.messages.map((message) => (
                     <MessageScrollerItem
@@ -445,63 +500,16 @@ export default function ChatApp() {
                     </MessageScrollerItem>
                   ))}
                 </MessageScrollerContent>
-              )}
-            </MessageScrollerViewport>
-            <MessageScrollerButton className="bottom-36" />
-          </MessageScroller>
-        </MessageScrollerProvider>
+                </MessageScrollerViewport>
+                <MessageScrollerButton className="bottom-36" />
+              </MessageScroller>
+            </MessageScrollerProvider>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 px-4 pb-4 pt-12 sm:px-6">
-          <div className="pointer-events-auto">
-            {chat.error && (
-              <ErrorBanner
-                message={chat.error}
-                canRetry={
-                  Boolean(conversations.lastUserMessage) ||
-                  conversations.lastAssistantErrored
-                }
-                onRetry={chat.retryLast}
-              />
-            )}
-            <Composer
-              value={input}
-              images={attachments.pendingImages}
-              pdfs={attachments.pendingPdfs}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              onKeyDown={handleKeyDown}
-              canSend={canSend}
-              isSending={chat.isSending}
-              onStop={chat.stopGenerating}
-              isReadingFiles={attachments.isReadingFiles}
-              isListening={voice.isListening}
-              note={resolvedComposerNote}
-              placeholder={
-                isImplementMode(conversations.activeAgentMode)
-                  ? "Describe the change you want"
-                  : isPlanMode(conversations.activeAgentMode)
-                    ? "Describe what you want planned"
-                  : "Ask about this repository"
-              }
-              onAttachClick={() => fileInputRef.current?.click()}
-              onHostedImageClick={attachments.addHostedImageUrl}
-              onRemoveImage={attachments.removePendingImage}
-              onRemovePdf={attachments.removePendingPdf}
-              onToggleVoice={voice.toggleVoiceInput}
-              inputRef={inputRef}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              aria-label="Attach images"
-              title="Attach images"
-              className="hidden"
-              multiple
-              accept="image/gif,image/jpeg,image/png,image/webp"
-              onChange={(event) => void handleFileInput(event.target.files)}
-            />
-          </div>
-        </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 px-4 pb-4 pt-12 sm:px-6">
+              <div className="pointer-events-auto">{composer}</div>
+            </div>
+          </>
+        )}
       </section>
     </main>
   );
