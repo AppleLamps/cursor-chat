@@ -76,7 +76,7 @@ describe("chat conversation helpers", () => {
   });
 
   it("normalizes invalid agent mode and strips private fields", () => {
-    const conversation = {
+    const conversation: Conversation = {
       ...createConversation(),
       agentMode: "bad-mode",
       modelId: "bad-model",
@@ -97,7 +97,7 @@ describe("chat conversation helpers", () => {
   });
 
   it("preserves plan mode and model during normalization and persistence", () => {
-    const conversation = {
+    const conversation: Conversation = {
       ...createConversation(),
       agentMode: "plan",
       modelId: "grok-4.5"

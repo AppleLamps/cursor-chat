@@ -33,6 +33,12 @@ import {
   setDefaultModelId,
   setDefaultRepo
 } from "@/lib/storage";
+import {
+  decodeConversationStorage,
+  encodeConversationStorage,
+  mergeConversationSnapshots,
+  type ConversationTombstones
+} from "@/lib/conversation-sync";
 
 type UseConversationStoreOptions = {
   apiKey: string | null;
@@ -42,14 +48,13 @@ type UseConversationStoreOptions = {
 const STORAGE_KEY = STORAGE_KEYS.CONVERSATIONS;
 
 async function parseStoredConversations(raw: string | null) {
-  const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-  return Array.isArray(parsed)
-    ? sortConversations(
-        await hydrateConversationsFromStorage(
-          parsed.filter(isConversation).map(normalizeConversation)
-        )
-      )
-    : [];
+  const decoded = decodeConversationStorage(raw);
+  const conversations = sortConversations(
+    await hydrateConversationsFromStorage(
+      decoded.conversations.filter(isConversation).map(normalizeConversation)
+    )
+  );
+  return { conversations, tombstones: decoded.tombstones };
 }
 
 export function useConversationStore({
@@ -65,6 +70,9 @@ export function useConversationStore({
   const persistenceRunRef = useRef(0);
   const externalSyncPausedRef = useRef(false);
   const pendingExternalStorageRef = useRef<string | null | undefined>(undefined);
+  const tombstonesRef = useRef<ConversationTombstones>({});
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const activeConversation = getActiveConversation(state);
   const messages = activeConversation?.messages ?? [];
@@ -76,9 +84,16 @@ export function useConversationStore({
   const hydrateExternalStorage = useCallback(
     async (raw: string | null, preferredActiveId?: string) => {
       const saved = await parseStoredConversations(raw);
+      const merged = mergeConversationSnapshots(
+        stateRef.current.conversations,
+        saved.conversations,
+        tombstonesRef.current,
+        saved.tombstones
+      );
+      tombstonesRef.current = merged.tombstones;
       dispatch({
         type: "hydrate",
-        conversations: saved,
+        conversations: merged.conversations,
         activeConversationId: preferredActiveId
       });
     },
@@ -96,11 +111,12 @@ export function useConversationStore({
 
         if (cancelled) return;
 
-        if (saved.length > 0) {
+        tombstonesRef.current = saved.tombstones;
+        if (saved.conversations.length > 0) {
           dispatch({
             type: "hydrate",
-            conversations: saved,
-            activeConversationId: saved[0]?.id
+            conversations: saved.conversations,
+            activeConversationId: saved.conversations[0]?.id
           });
         }
       } catch {
@@ -136,7 +152,12 @@ export function useConversationStore({
 
         window.localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify(serializedConversations)
+          JSON.stringify(
+            encodeConversationStorage(
+              serializedConversations,
+              tombstonesRef.current
+            )
+          )
         );
         void pruneStoredImages(activeImageKeys).catch(() => undefined);
       } catch {
@@ -199,6 +220,7 @@ export function useConversationStore({
   );
 
   const createAndActivateConversation = useCallback((conversation: Conversation) => {
+    delete tombstonesRef.current[conversation.id];
     dispatch({ type: "create", conversation });
   }, []);
 
@@ -230,6 +252,7 @@ export function useConversationStore({
   );
 
   const deleteConversation = useCallback((id: string) => {
+    tombstonesRef.current[id] = new Date().toISOString();
     dispatch({ type: "delete", id });
   }, []);
 

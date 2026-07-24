@@ -14,8 +14,9 @@ describe("createStreamBuffer", () => {
     buffer.setActivity("Finished searching");
     buffer.flushNow();
 
-    expect(snapshot?.activity).toBe("Finished searching");
-    expect(snapshot?.activityLog).toEqual([
+    const finalSnapshot = buffer.getSnapshot();
+    expect(finalSnapshot.activity).toBe("Finished searching");
+    expect(finalSnapshot.activityLog).toEqual([
       "Starting Cursor cloud agent...",
       "Searching the codebase...",
       "Finished searching"

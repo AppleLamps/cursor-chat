@@ -15,7 +15,7 @@ type OnboardingProps = {
 export default function Onboarding({ onComplete }: OnboardingProps) {
   const [apiKey, setApiKey] = useState("");
   const [githubToken, setGithubToken] = useState("");
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -54,7 +54,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           </h1>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#5f6368]">
             Paste a Cursor API key to ask questions about your repositories. Your
-            keys stay on this device unless you choose to remember them.
+            keys stay in this browser session unless you choose to remember them.
           </p>
         </div>
 
@@ -129,7 +129,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
             <span>
               Remember on this device
               <span className="mt-1 block text-xs leading-5 text-[#8a8a8a]">
-                Stored in browser local storage on this computer only.
+                Persisted in browser local storage on this computer.
               </span>
             </span>
           </label>
