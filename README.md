@@ -1,6 +1,6 @@
 # AskCursor
 
-[AskCursor](https://askcursor.app) is a Next.js app for asking questions, planning changes, and running scoped implementation tasks against GitHub repositories. Each user brings their own [Cursor API key](https://cursor.com/dashboard/integrations), picks a connected GitHub repo, and chats with a Cursor cloud agent.
+[AskCursor](https://askcursor.app) is a Next.js app for asking questions, planning changes, and running scoped implementation tasks against GitHub repositories. Each user brings their own [Cursor API key](https://cursor.com/dashboard/integrations), picks a connected GitHub repo, and chats with a Cursor cloud agent..
 
 ## Features
 
