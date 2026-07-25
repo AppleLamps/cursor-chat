@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Agent } from "@cursor/sdk";
-import { POST } from "@/app/api/chat/route";
+import { maxDuration, POST } from "@/app/api/chat/route";
 import { createAgentSessionToken } from "@/lib/agent-session";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -75,6 +75,10 @@ describe("chat route validation and rate limiting", () => {
     mockedCheckRateLimit.mockResolvedValue({ allowed: true });
     mockedAgentCreate.mockReset();
     mockedAgentResume.mockReset();
+  });
+
+  it("declares a platform duration long enough for cloud agent runs", () => {
+    expect(maxDuration).toBe(300);
   });
 
   it("does not charge chat rate limits for invalid repositories", async () => {

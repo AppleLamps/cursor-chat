@@ -44,6 +44,11 @@ import {
   type TerminationReason
 } from "@/lib/agent-run-termination";
 
+// Keep this compatible with Vercel Hobby while opting the route into the
+// longest duration available on that plan. The application timeout below fires
+// first so clients receive a structured SSE error instead of an abrupt EOF.
+export const maxDuration = 300;
+
 type ChatRequest = {
   apiKey?: string;
   prompt?: string;
@@ -58,7 +63,9 @@ type ChatRequest = {
 };
 
 const MAX_PROMPT_CHARS = 32_000;
-const DEFAULT_CHAT_RUN_TIMEOUT_MS = 10 * 60_000;
+const MAX_CHAT_RUN_TIMEOUT_MS = maxDuration * 1_000 - 15_000;
+const DEFAULT_CHAT_RUN_TIMEOUT_MS = MAX_CHAT_RUN_TIMEOUT_MS;
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
 
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream; charset=utf-8",
@@ -91,7 +98,7 @@ type RunTelemetry = {
 function parseChatRunTimeoutMs() {
   const value = Number(process.env.ASKCURSOR_CHAT_RUN_TIMEOUT_MS);
   return Number.isInteger(value) && value > 0
-    ? value
+    ? Math.min(value, MAX_CHAT_RUN_TIMEOUT_MS)
     : DEFAULT_CHAT_RUN_TIMEOUT_MS;
 }
 
@@ -478,6 +485,7 @@ export async function POST(request: Request) {
       const runTimeoutMs = parseChatRunTimeoutMs();
       let streamClosed = false;
       let timeout: ReturnType<typeof setTimeout> | undefined;
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
       let slotReleased = false;
       let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
       let currentRun: Run | null = null;
@@ -493,6 +501,13 @@ export async function POST(request: Request) {
         if (streamClosed) return;
         streamClosed = true;
         controller.close();
+      };
+
+      const sendHeartbeat = () => {
+        if (streamClosed) return;
+        // SSE comments are ignored by the client parser but keep the HTTP
+        // response active while the agent is busy without emitting SDK events.
+        controller.enqueue(encoder.encode(": heartbeat\n\n"));
       };
 
       const releaseSlot = async () => {
@@ -542,6 +557,7 @@ export async function POST(request: Request) {
       timeout = setTimeout(() => {
         void terminateRun("timeout");
       }, runTimeoutMs);
+      heartbeat = setInterval(sendHeartbeat, SSE_HEARTBEAT_INTERVAL_MS);
 
       try {
         send("status", { message: "Starting Cursor cloud agent..." });
@@ -699,6 +715,7 @@ export async function POST(request: Request) {
       } finally {
         request.signal.removeEventListener("abort", handleRequestAbort);
         if (timeout) clearTimeout(timeout);
+        if (heartbeat) clearInterval(heartbeat);
         await terminationPromise;
         await disposeAgent();
         await releaseSlot();
