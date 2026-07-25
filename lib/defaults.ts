@@ -19,16 +19,14 @@ export const AVAILABLE_MODELS = [
   }
 ] as const;
 
-export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
+/** Cursor model identifiers are account-scoped and supplied dynamically. */
+export type ModelId = string;
 
 export const DEFAULT_MODEL_ID: ModelId = "composer-2.5";
 
 export function parseModelId(value: unknown): ModelId {
   const modelId = typeof value === "string" ? value.trim() : "";
-  return (
-    AVAILABLE_MODELS.find((model) => model.id === modelId)?.id ??
-    DEFAULT_MODEL_ID
-  );
+  return modelId || DEFAULT_MODEL_ID;
 }
 
 export function validateModelId(value: unknown):

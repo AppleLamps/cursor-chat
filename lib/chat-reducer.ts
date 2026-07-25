@@ -1,5 +1,6 @@
 import { DEFAULT_BRANCH, type AgentMode, type ModelId } from "@/lib/defaults";
 import type { Conversation, Message } from "@/lib/chat-types";
+import type { ModelSelection } from "@/lib/model-client";
 import {
   latestUserMessage,
   resolveConversationAgentMode,
@@ -30,9 +31,10 @@ export type ConversationAction =
       repoUrl: string;
       branch: string;
       modelId: ModelId;
+      model?: ModelSelection;
     }
   | { type: "change-mode"; id: string; mode: AgentMode }
-  | { type: "change-model"; id: string; modelId: ModelId }
+  | { type: "change-model"; id: string; modelId: ModelId; model?: ModelSelection }
   | {
       type: "replace-messages";
       conversationId: string;
@@ -45,6 +47,18 @@ export type ConversationAction =
       conversationId: string;
       messageId: string;
       patch: Partial<Message>;
+    }
+  | {
+      type: "patch-agent-session";
+      conversationId: string;
+      agentId: string;
+      agentSessionToken?: string;
+    }
+  | {
+      type: "patch-agent-lifecycle";
+      conversationId: string;
+      archived?: boolean;
+      deleted?: boolean;
     }
   | {
       type: "merge-source";
@@ -123,6 +137,7 @@ export function conversationReducer(
                   repoUrl: action.repoUrl,
                   branch: action.branch,
                   modelId: action.modelId,
+                  model: action.model ?? { id: action.modelId },
                   agentId: undefined,
                   agentSessionToken: undefined,
                   updatedAt: new Date().toISOString()
@@ -159,6 +174,7 @@ export function conversationReducer(
               ? {
                   ...conversation,
                   modelId: action.modelId,
+                  model: action.model ?? { id: action.modelId },
                   agentId: undefined,
                   agentSessionToken: undefined,
                   updatedAt: new Date().toISOString()
@@ -200,6 +216,40 @@ export function conversationReducer(
                     ? { ...message, ...action.patch }
                     : message
                 )
+              }
+            : conversation
+        )
+      };
+
+    case "patch-agent-session":
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === action.conversationId
+            ? {
+                ...conversation,
+                agentId: action.agentId,
+                agentSessionToken:
+                  action.agentSessionToken ?? conversation.agentSessionToken,
+                updatedAt: new Date().toISOString()
+              }
+            : conversation
+        )
+      };
+
+    case "patch-agent-lifecycle":
+      return {
+        ...state,
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === action.conversationId
+            ? {
+                ...conversation,
+                agentArchived: action.deleted ? undefined : action.archived,
+                agentId: action.deleted ? undefined : conversation.agentId,
+                agentSessionToken: action.deleted
+                  ? undefined
+                  : conversation.agentSessionToken,
+                updatedAt: new Date().toISOString()
               }
             : conversation
         )

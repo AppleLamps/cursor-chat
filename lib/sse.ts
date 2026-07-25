@@ -1,8 +1,10 @@
 export type ChatStreamEventName =
   | "agent"
+  | "run"
   | "text"
   | "thinking"
   | "tool"
+  | "task"
   | "source"
   | "status"
   | "done"
@@ -55,21 +57,50 @@ export function parseSseBuffer(buffer: string) {
   return { events, malformedEvents, rest };
 }
 
-export function toolActivityLabel(name: string, status: string) {
+export function toolActivityLabel(
+  name: string,
+  status: string,
+  options: { argsTruncated?: boolean; resultTruncated?: boolean } = {}
+) {
   const normalized = name.toLowerCase();
+  const suffix =
+    options.argsTruncated || options.resultTruncated ? " (details truncated)" : "";
+
+  if (status === "error") {
+    return `Tool ${name} failed${suffix}`;
+  }
+
   const prefix = status === "running" ? "Running" : "Finished";
 
   if (normalized.includes("read") || normalized === "read") {
-    return status === "running" ? "Reading files…" : "Finished reading files";
+    return `${status === "running" ? "Reading files…" : "Finished reading files"}${suffix}`;
   }
 
   if (normalized.includes("grep") || normalized.includes("search")) {
-    return status === "running" ? "Searching the codebase…" : "Finished searching";
+    return `${status === "running" ? "Searching the codebase…" : "Finished searching"}${suffix}`;
   }
 
   if (normalized.includes("glob") || normalized.includes("ls")) {
-    return status === "running" ? "Scanning files…" : "Finished scanning files";
+    return `${status === "running" ? "Scanning files…" : "Finished scanning files"}${suffix}`;
   }
 
-  return `${prefix} ${name}…`;
+  return `${prefix} ${name}…${suffix}`;
+}
+
+export function taskActivityLabel(status?: string) {
+  const normalized = status?.trim().toLowerCase();
+
+  if (normalized === "completed" || normalized === "finished") {
+    return "Finished delegated task";
+  }
+
+  if (
+    normalized === "error" ||
+    normalized === "failed" ||
+    normalized === "cancelled"
+  ) {
+    return "Delegated task failed";
+  }
+
+  return "Working on a delegated task…";
 }

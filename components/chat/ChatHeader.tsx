@@ -19,7 +19,12 @@ export default function ChatHeader({
   prUrl,
   onChangeRepo,
   onToggleSidebar,
-  onOpenMobileSidebar
+  onOpenMobileSidebar,
+  canManageCloudAgent,
+  cloudAgentArchived,
+  lifecycleBusy,
+  onToggleCloudArchive,
+  onDeleteCloudAgent
 }: {
   onReset: () => void;
   onShare: () => void;
@@ -34,6 +39,11 @@ export default function ChatHeader({
   onChangeRepo: () => void;
   onToggleSidebar: () => void;
   onOpenMobileSidebar: () => void;
+  canManageCloudAgent: boolean;
+  cloudAgentArchived: boolean;
+  lifecycleBusy: boolean;
+  onToggleCloudArchive: () => void;
+  onDeleteCloudAgent: () => void;
 }) {
   return (
     <header className="flex h-14 items-center justify-between gap-3 border-b border-border bg-background px-3 sm:px-5">
@@ -159,6 +169,34 @@ export default function ChatHeader({
         >
           {shareStatus || "Share"}
         </Button>
+        {canManageCloudAgent ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onToggleCloudArchive}
+              disabled={lifecycleBusy}
+              title={
+                cloudAgentArchived
+                  ? "Restore this Cursor cloud agent"
+                  : "Archive this Cursor cloud agent"
+              }
+            >
+              {cloudAgentArchived ? "Unarchive agent" : "Archive agent"}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={onDeleteCloudAgent}
+              disabled={lifecycleBusy}
+              title="Permanently delete this Cursor cloud agent (does not delete the local chat)"
+            >
+              Delete cloud agent
+            </Button>
+          </>
+        ) : null}
       </div>
     </header>
   );

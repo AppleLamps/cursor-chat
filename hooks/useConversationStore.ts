@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { DEFAULT_BRANCH, type AgentMode, type ModelId } from "@/lib/defaults";
 import type { Conversation, Message } from "@/lib/chat-types";
+import type { ModelSelection } from "@/lib/model-client";
 import {
   createConversation,
   isConversation,
@@ -27,10 +28,12 @@ import {
   getDefaultAgentMode,
   getDefaultBranch,
   getDefaultModelId,
+  getDefaultModel,
   getDefaultRepo,
   setDefaultAgentMode,
   setDefaultBranch,
   setDefaultModelId,
+  setDefaultModel,
   setDefaultRepo
 } from "@/lib/storage";
 import {
@@ -186,7 +189,8 @@ export function useConversationStore({
         defaultRepo,
         getDefaultBranch() || DEFAULT_BRANCH,
         getDefaultAgentMode(),
-        getDefaultModelId()
+        getDefaultModelId(),
+        getDefaultModel()
       )
     });
   }, [hasHydrated, apiKey, state.conversations.length]);
@@ -229,8 +233,8 @@ export function useConversationStore({
   }, []);
 
   const updateConversationRepo = useCallback(
-    (id: string, repoUrl: string, branch: string, modelId: ModelId) => {
-      dispatch({ type: "change-repo", id, repoUrl, branch, modelId });
+    (id: string, repoUrl: string, branch: string, model: ModelSelection) => {
+      dispatch({ type: "change-repo", id, repoUrl, branch, modelId: model.id, model });
     },
     []
   );
@@ -244,9 +248,9 @@ export function useConversationStore({
   );
 
   const setActiveConversationModelId = useCallback(
-    (modelId: ModelId) => {
+    (model: ModelSelection) => {
       if (!activeConversation || messages.length > 0) return;
-      dispatch({ type: "change-model", id: activeConversation.id, modelId });
+      dispatch({ type: "change-model", id: activeConversation.id, modelId: model.id, model });
     },
     [activeConversation, messages.length]
   );
@@ -294,6 +298,36 @@ export function useConversationStore({
     []
   );
 
+  const patchAgentSessionForConversation = useCallback(
+    (
+      conversationId: string,
+      agentId: string,
+      agentSessionToken?: string
+    ) => {
+      dispatch({
+        type: "patch-agent-session",
+        conversationId,
+        agentId,
+        agentSessionToken
+      });
+    },
+    []
+  );
+
+  const patchAgentLifecycleForConversation = useCallback(
+    (
+      conversationId: string,
+      lifecycle: { archived?: boolean; deleted?: boolean }
+    ) => {
+      dispatch({
+        type: "patch-agent-lifecycle",
+        conversationId,
+        ...lifecycle
+      });
+    },
+    []
+  );
+
   const mergeSourceForConversation = useCallback(
     (conversationId: string, messageId: string, source: string) => {
       dispatch({ type: "merge-source", conversationId, messageId, source });
@@ -306,12 +340,12 @@ export function useConversationStore({
       repoUrl: string,
       branch: string,
       agentMode: AgentMode,
-      modelId: ModelId
+      model: ModelSelection
     ) => {
       setDefaultRepo(repoUrl);
       setDefaultBranch(branch);
       setDefaultAgentMode(agentMode);
-      setDefaultModelId(modelId);
+      setDefaultModel(model);
     },
     []
   );
@@ -343,6 +377,8 @@ export function useConversationStore({
       renameConversation,
       replaceMessagesForConversation,
       patchMessageForConversation,
+      patchAgentSessionForConversation,
+      patchAgentLifecycleForConversation,
       mergeSourceForConversation,
       setExternalSyncPaused,
       rememberRepoSelection,
@@ -365,6 +401,8 @@ export function useConversationStore({
       renameConversation,
       replaceMessagesForConversation,
       patchMessageForConversation,
+      patchAgentSessionForConversation,
+      patchAgentLifecycleForConversation,
       mergeSourceForConversation,
       setExternalSyncPaused,
       rememberRepoSelection,

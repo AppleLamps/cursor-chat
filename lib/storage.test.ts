@@ -4,10 +4,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   STORAGE_KEYS,
   clearStoredApiKey,
+  getDefaultModel,
   getStoredApiKey,
   getStoredGitHubToken,
   persistApiKey,
-  persistGitHubToken
+  persistGitHubToken,
+  setDefaultModel
 } from "@/lib/storage";
 
 describe("credential storage", () => {
@@ -48,5 +50,20 @@ describe("credential storage", () => {
     expect(getStoredApiKey()).toBeNull();
     expect(getStoredGitHubToken()).toBeNull();
     expect(window.sessionStorage.length).toBe(0);
+  });
+
+  it("persists canonical model parameters and reads legacy model IDs", () => {
+    setDefaultModel({
+      id: "cursor-router",
+      params: [{ id: "mode", value: "balance" }]
+    });
+    expect(getDefaultModel()).toEqual({
+      id: "cursor-router",
+      params: [{ id: "mode", value: "balance" }]
+    });
+
+    window.localStorage.removeItem(STORAGE_KEYS.DEFAULT_MODEL);
+    window.localStorage.setItem(STORAGE_KEYS.DEFAULT_MODEL_ID, "legacy-model");
+    expect(getDefaultModel()).toEqual({ id: "legacy-model" });
   });
 });

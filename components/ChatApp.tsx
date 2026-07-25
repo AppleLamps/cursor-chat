@@ -18,20 +18,20 @@ import {
   MessageScrollerViewport
 } from "@/components/ui/message-scroller";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
-import { createConversation } from "@/lib/chat-conversation";
+import { createConversation, resolveConversationModel } from "@/lib/chat-conversation";
 import type { Conversation, RepoPickerMode } from "@/lib/chat-types";
 import {
   DEFAULT_BRANCH,
   modelLabel,
   type AgentMode,
-  type ModelId
 } from "@/lib/defaults";
+import type { ModelSelection } from "@/lib/model-client";
 import { repoLabel } from "@/lib/repo";
 import {
   STORAGE_KEYS,
   getDefaultAgentMode,
   getDefaultBranch,
-  getDefaultModelId,
+  getDefaultModel,
   getDefaultRepo
 } from "@/lib/storage";
 import { useAttachments } from "@/hooks/useAttachments";
@@ -40,6 +40,7 @@ import { useChatSend } from "@/hooks/useChatSend";
 import { useConversationStore } from "@/hooks/useConversationStore";
 import { useRepoCatalog } from "@/hooks/useRepoCatalog";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useModelCatalog } from "@/hooks/useModelCatalog";
 
 const SIDEBAR_STORAGE_KEY = STORAGE_KEYS.SIDEBAR;
 
@@ -50,6 +51,7 @@ export default function ChatApp() {
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [repoPickerMode, setRepoPickerMode] =
     useState<RepoPickerMode>("initial");
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,6 +62,7 @@ export default function ChatApp() {
 
   const auth = useAuthSettings();
   const repos = useRepoCatalog(auth.apiKey, auth.hasAuthHydrated);
+  const modelCatalog = useModelCatalog(auth.apiKey);
   const conversations = useConversationStore({
     apiKey: auth.apiKey,
     onError: (message) => setChatErrorRef.current(message)
@@ -100,6 +103,8 @@ export default function ChatApp() {
     activeConversationIdRef: conversations.activeConversationIdRef,
     replaceMessagesForConversation: conversations.replaceMessagesForConversation,
     patchMessageForConversation: conversations.patchMessageForConversation,
+    patchAgentSessionForConversation:
+      conversations.patchAgentSessionForConversation,
     mergeSourceForConversation: conversations.mergeSourceForConversation,
     setExternalSyncPaused: conversations.setExternalSyncPaused
   });
@@ -140,10 +145,10 @@ export default function ChatApp() {
     branch: string,
     rememberAsDefault: boolean,
     agentMode: AgentMode,
-    modelId: ModelId
+    model: ModelSelection
   ) {
     if (rememberAsDefault) {
-      conversations.rememberRepoSelection(repoUrl, branch, agentMode, modelId);
+      conversations.rememberRepoSelection(repoUrl, branch, agentMode, model);
     }
 
     if (repoPickerMode === "change" && conversations.activeConversation) {
@@ -151,14 +156,14 @@ export default function ChatApp() {
         conversations.activeConversation.id,
         repoUrl,
         branch,
-        modelId
+        model
       );
       setRepoPickerOpen(false);
       chat.setError(null);
       return;
     }
 
-    activateConversation(createConversation(repoUrl, branch, agentMode, modelId));
+    activateConversation(createConversation(repoUrl, branch, agentMode, model.id, model));
     setRepoPickerOpen(false);
     setRepoPickerMode("initial");
     chat.setError(null);
@@ -181,7 +186,8 @@ export default function ChatApp() {
         repoUrl,
         branch,
         conversations.activeAgentMode,
-        getDefaultModelId()
+        getDefaultModel().id,
+        getDefaultModel()
       )
     );
   }
@@ -223,6 +229,75 @@ export default function ChatApp() {
     }
   }
 
+  async function manageCloudAgent(action: "archive" | "unarchive" | "delete") {
+    const conversation = conversations.activeConversation;
+    if (
+      !conversation?.agentId ||
+      !conversation.agentSessionToken ||
+      !conversation.repoUrl
+    ) {
+      chat.setError("This chat does not have an authorized Cursor cloud agent.");
+      return;
+    }
+
+    if (
+      action === "delete" &&
+      !window.confirm(
+        "Permanently delete this Cursor cloud agent? This cannot be undone. " +
+          "Your local chat history will remain, but it can no longer continue that agent."
+      )
+    ) {
+      return;
+    }
+
+    setLifecycleBusy(true);
+    chat.setError(null);
+    try {
+      const response = await fetch("/api/agents/lifecycle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action,
+          apiKey: auth.apiKey,
+          agentId: conversation.agentId,
+          agentSessionToken: conversation.agentSessionToken,
+          repoUrl: conversation.repoUrl,
+          branch: conversation.branch || DEFAULT_BRANCH,
+          agentMode: conversations.activeAgentMode,
+          model: resolveConversationModel(conversation)
+        })
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        archived?: boolean;
+        deleted?: boolean;
+      };
+      if (!response.ok) {
+        throw new Error(result.error || "The cloud agent lifecycle request failed.");
+      }
+
+      conversations.patchAgentLifecycleForConversation(conversation.id, {
+        archived: result.archived,
+        deleted: result.deleted
+      });
+      chat.setComposerNote(
+        action === "delete"
+          ? "Cursor cloud agent permanently deleted. Local chat history was kept."
+          : action === "archive"
+            ? "Cursor cloud agent archived."
+            : "Cursor cloud agent restored."
+      );
+    } catch (error) {
+      chat.setError(
+        error instanceof Error
+          ? error.message
+          : "The cloud agent lifecycle request failed."
+      );
+    } finally {
+      setLifecycleBusy(false);
+    }
+  }
+
   function handleSignOut() {
     auth.signOut();
     repos.resetRepositories();
@@ -258,7 +333,9 @@ export default function ChatApp() {
     }
   }
 
-  const activeModelLabel = modelLabel(conversations.activeModelId);
+  const activeModelLabel =
+    modelCatalog.models.find((model) => model.id === conversations.activeModelId)
+      ?.displayName ?? modelLabel(conversations.activeModelId);
   const activeRepoLabel = conversations.activeConversation?.repoUrl
     ? `${repoLabel(conversations.activeConversation.repoUrl)} · ${
         conversations.activeConversation.branch || DEFAULT_BRANCH
@@ -363,7 +440,10 @@ export default function ChatApp() {
         githubToken={auth.githubToken}
         initialBranch={getDefaultBranch() || DEFAULT_BRANCH}
         initialAgentMode={getDefaultAgentMode()}
-        initialModelId={getDefaultModelId()}
+        initialModel={getDefaultModel()}
+        models={modelCatalog.models}
+        modelsLoading={modelCatalog.loading}
+        usingFallbackModels={modelCatalog.usingFallback}
         onRetry={() => void repos.loadRepositories(auth.apiKey!)}
         onChangeCredentials={handleSignOut}
         onSelect={handleRepoSelect}
@@ -417,9 +497,17 @@ export default function ChatApp() {
             }
             initialModelId={
               repoPickerMode === "new-chat"
-                ? getDefaultModelId()
+                ? getDefaultModel().id
                 : conversations.activeModelId
             }
+            initialModel={
+              repoPickerMode === "new-chat"
+                ? getDefaultModel()
+                : resolveConversationModel(conversations.activeConversation)
+            }
+            models={modelCatalog.models}
+            modelsLoading={modelCatalog.loading}
+            usingFallbackModels={modelCatalog.usingFallback}
             allowModeSelection={repoPickerMode !== "change"}
             title={
               repoPickerMode === "new-chat"
@@ -457,6 +545,22 @@ export default function ChatApp() {
           }
           onToggleSidebar={() => setSidebarOpen((current) => !current)}
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+          canManageCloudAgent={Boolean(
+            conversations.activeConversation?.agentId &&
+              conversations.activeConversation?.agentSessionToken
+          )}
+          cloudAgentArchived={
+            conversations.activeConversation?.agentArchived === true
+          }
+          lifecycleBusy={lifecycleBusy}
+          onToggleCloudArchive={() =>
+            void manageCloudAgent(
+              conversations.activeConversation?.agentArchived
+                ? "unarchive"
+                : "archive"
+            )
+          }
+          onDeleteCloudAgent={() => void manageCloudAgent("delete")}
         />
 
         {!hasMessages ? (
@@ -496,6 +600,14 @@ export default function ChatApp() {
                         copied={chat.copiedMessageId === message.id}
                         onCopy={() => void chat.copyMessage(message)}
                         onRetry={() => chat.retryAssistantMessage(message.id)}
+                        artifactScope={
+                          conversations.activeConversation && auth.apiKey
+                            ? {
+                                apiKey: auth.apiKey,
+                                conversation: conversations.activeConversation
+                              }
+                            : undefined
+                        }
                       />
                     </MessageScrollerItem>
                   ))}

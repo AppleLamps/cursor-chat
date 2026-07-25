@@ -34,6 +34,22 @@ describe("agent session tokens", () => {
     ).toMatchObject({ valid: false });
   });
 
+  it("binds validation to canonical model parameters", () => {
+    const parameterized = {
+      ...context,
+      modelParams: [{ id: "mode", value: "cost" }]
+    };
+    const token = createAgentSessionToken(parameterized);
+
+    expect(verifyAgentSessionToken(token, parameterized)).toEqual({ valid: true });
+    expect(
+      verifyAgentSessionToken(token, {
+        ...parameterized,
+        modelParams: [{ id: "mode", value: "intelligence" }]
+      })
+    ).toMatchObject({ valid: false });
+  });
+
   it("accepts legacy tokens without a model only for the default model", () => {
     const token = createAgentSessionToken({
       ...context,

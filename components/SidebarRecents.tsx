@@ -195,8 +195,8 @@ function ConversationRow({
         type="button"
         onClick={onDelete}
         className="mr-1 hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#777] transition hover:bg-[#dedede] hover:text-[#111] group-hover:flex"
-        aria-label={`Delete ${conversation.title}`}
-        title="Delete"
+        aria-label={`Delete local chat ${conversation.title}`}
+        title="Delete local chat only"
       >
         <IconClose className="h-3.5 w-3.5" />
       </button>

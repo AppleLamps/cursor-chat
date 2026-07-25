@@ -1,5 +1,5 @@
-import { Agent, AgentNotFoundError, CursorAgentError } from "@cursor/sdk";
-import type { Run, RunResult } from "@cursor/sdk";
+import { Agent, AgentNotFoundError, CursorSdkError } from "@cursor/sdk";
+import type { ModelSelection, Run, RunResult } from "@cursor/sdk";
 import { NextResponse } from "next/server";
 import {
   isImplementMode,
@@ -13,10 +13,15 @@ import {
 } from "@/lib/cursor-prompt";
 import {
   DEFAULT_BRANCH,
-  validateModelId,
   type AgentMode,
   type ModelId
 } from "@/lib/defaults";
+import {
+  getFallbackModelCatalog,
+  getModelCatalog,
+  normalizeModelSelection,
+  validateSelectionAgainstCatalog
+} from "@/lib/model-catalog";
 import {
   MAX_CHAT_BODY_BYTES,
   chatImagesToSdk,
@@ -39,10 +44,7 @@ import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
 import { validateBranch, validateRepoUrl } from "@/lib/validate";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
-import {
-  terminateAgentRun,
-  type TerminationReason
-} from "@/lib/agent-run-termination";
+import type { TerminationReason } from "@/lib/agent-run-termination";
 
 // Keep this compatible with Vercel Hobby while opting the route into the
 // longest duration available on that plan. The application timeout below fires
@@ -56,8 +58,11 @@ type ChatRequest = {
   branch?: string;
   agentId?: string;
   agentSessionToken?: string;
+  turnId?: string;
+  recoverRunId?: string;
   agentMode?: AgentMode;
   modelId?: string;
+  model?: ModelSelection;
   implementConfirmed?: boolean;
   images?: Array<{ url?: string; mimeType?: string }>;
 };
@@ -79,10 +84,12 @@ type StreamRunContext = {
   branch: string;
   agentMode: AgentMode;
   modelId: ModelId;
+  modelSelection: ModelSelection;
   promptText: string;
   sdkImages: ReturnType<typeof chatImagesToSdk>;
   agentId?: string;
   agentSessionToken?: string;
+  turnId: string;
   send: (event: ChatStreamEventName, data: Record<string, unknown>) => void;
 };
 
@@ -145,7 +152,12 @@ async function streamRunEvents(
     }
 
     if (event.type === "tool_call") {
-      send("tool", { name: event.name, status: event.status });
+      send("tool", {
+        name: event.name,
+        status: event.status,
+        argsTruncated: event.truncated?.args === true,
+        resultTruncated: event.truncated?.result === true
+      });
 
       if (event.status === "completed") {
         for (const path of extractSourcePaths(
@@ -157,6 +169,13 @@ async function streamRunEvents(
         }
       }
 
+      continue;
+    }
+
+    if (event.type === "task") {
+      // Task text may contain user input, repository content, or tool arguments.
+      // Only forward its lifecycle status; the client renders a fixed safe label.
+      send("task", { status: event.status });
       continue;
     }
 
@@ -181,7 +200,7 @@ function modelIdFromResult(result: RunResult, run: Run) {
   return result.model?.id ?? run.model?.id;
 }
 
-function requestIdFrom(error: CursorAgentError, run?: Run | null) {
+function requestIdFrom(error: CursorSdkError, run?: Run | null) {
   return error.requestId ?? run?.requestId;
 }
 
@@ -196,7 +215,7 @@ function logCursorFailure({
   repoUrl,
   branch
 }: {
-  error: CursorAgentError | Error | string;
+  error: CursorSdkError | Error | string;
   agentId?: string;
   run?: Run | null;
   runId?: string;
@@ -206,7 +225,7 @@ function logCursorFailure({
   repoUrl: string;
   branch: string;
 }) {
-  const sdkError = error instanceof CursorAgentError ? error : null;
+  const sdkError = error instanceof CursorSdkError ? error : null;
 
   console.error("Cursor agent run failed", {
     agentId: agentId ?? run?.agentId,
@@ -228,7 +247,8 @@ async function createCloudAgent(
   repoUrl: string,
   branch: string,
   agentMode: AgentMode,
-  modelId: ModelId
+  modelSelection: ModelSelection,
+  turnId: string
 ) {
   const cloudBase = {
     repos: [{ url: repoUrl, startingRef: branch }]
@@ -236,8 +256,9 @@ async function createCloudAgent(
 
   return Agent.create({
     apiKey,
-    model: { id: modelId },
+    model: modelSelection,
     mode: sdkModeForAgentMode(agentMode),
+    idempotencyKey: `${turnId}:agent`,
     cloud: isImplementMode(agentMode)
       ? { ...cloudBase, autoCreatePR: true }
       : { ...cloudBase, skipReviewerRequest: true }
@@ -250,8 +271,10 @@ async function startFirstRun({
   branch,
   agentMode,
   modelId,
+  modelSelection,
   promptText,
   sdkImages,
+  turnId,
   send
 }: Omit<StreamRunContext, "agentId">) {
   const agent = await createCloudAgent(
@@ -259,7 +282,8 @@ async function startFirstRun({
     repoUrl,
     branch,
     agentMode,
-    modelId
+    modelSelection,
+    turnId
   );
   const agentSessionToken = createAgentSessionToken({
     agentId: agent.agentId,
@@ -267,7 +291,8 @@ async function startFirstRun({
     repoUrl,
     branch,
     agentMode,
-    modelId
+    modelId,
+    modelParams: modelSelection.params
   });
   send("agent", { agentId: agent.agentId, agentSessionToken });
 
@@ -279,6 +304,7 @@ async function startFirstRun({
   );
 
   const run = await agent.send(agentMessage, {
+    idempotencyKey: `${turnId}:send`,
     mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
@@ -302,9 +328,11 @@ async function startFollowUpRun({
   branch,
   agentMode,
   modelId,
+  modelSelection,
   promptText,
   sdkImages,
   agentId,
+  turnId,
   send
 }: StreamRunContext) {
   let agent: Awaited<ReturnType<typeof Agent.create>> | null = null;
@@ -312,7 +340,7 @@ async function startFollowUpRun({
   try {
     agent = await Agent.resume(agentId!, {
       apiKey,
-      model: { id: modelId },
+      model: modelSelection,
       mode: sdkModeForAgentMode(agentMode)
     });
   } catch (resumeError) {
@@ -327,13 +355,15 @@ async function startFollowUpRun({
         branch,
         agentMode,
         modelId,
+        modelSelection,
         promptText,
         sdkImages,
+        turnId,
         send
       });
     }
 
-    if (!(resumeError instanceof CursorAgentError)) {
+    if (!(resumeError instanceof CursorSdkError)) {
       throw resumeError;
     }
 
@@ -346,7 +376,8 @@ async function startFollowUpRun({
     repoUrl,
     branch,
     agentMode,
-    modelId
+    modelId,
+    modelParams: modelSelection.params
   });
   send("agent", { agentId: agent.agentId, agentSessionToken });
 
@@ -357,6 +388,7 @@ async function startFollowUpRun({
       : promptText;
 
   const run = await agent.send(agentMessage, {
+    idempotencyKey: `${turnId}:send`,
     mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
@@ -371,6 +403,56 @@ async function startFollowUpRun({
     run,
     agent,
     streamedTextLength
+  };
+}
+
+async function recoverRun({
+  apiKey,
+  repoUrl,
+  branch,
+  agentMode,
+  modelId,
+  modelSelection,
+  agentId,
+  recoverRunId,
+  send
+}: Pick<
+  StreamRunContext,
+  | "apiKey"
+  | "repoUrl"
+  | "branch"
+  | "agentMode"
+  | "modelId"
+  | "modelSelection"
+  | "agentId"
+  | "send"
+> & { recoverRunId: string }) {
+  const run = await Agent.getRun(recoverRunId, {
+    runtime: "cloud",
+    agentId: agentId!,
+    apiKey
+  });
+
+  if (run.agentId !== agentId) {
+    throw new Error("The recovered run does not belong to this agent session.");
+  }
+
+  const agentSessionToken = createAgentSessionToken({
+    agentId: agentId!,
+    apiKey,
+    repoUrl,
+    branch,
+    agentMode,
+    modelId,
+    modelParams: modelSelection.params
+  });
+
+  return {
+    agentId: agentId!,
+    agentSessionToken,
+    run,
+    agent: null,
+    streamedTextLength: 0
   };
 }
 
@@ -393,19 +475,57 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: branchValidation.error }, { status: 400 });
   }
 
-  const modelValidation = validateModelId(body.modelId);
-  if (!modelValidation.ok) {
-    return NextResponse.json({ error: modelValidation.error }, { status: 400 });
-  }
-
   const repoUrl = repoValidation.value.url;
   const branch = branchValidation.value;
-  const modelId = modelValidation.value;
   const agentId = body.agentId?.trim();
   const agentSessionToken = body.agentSessionToken?.trim();
+  const turnId = body.turnId?.trim();
+  const recoverRunId = body.recoverRunId?.trim();
 
   if (!apiKey) {
     return NextResponse.json({ error: "API key is required." }, { status: 400 });
+  }
+
+  const requestedModel = normalizeModelSelection(body.model, body.modelId);
+  if (!requestedModel) {
+    return NextResponse.json(
+      { error: "A valid Cursor model selection is required." },
+      { status: 400 }
+    );
+  }
+
+  let modelSelection = requestedModel;
+  if (!recoverRunId) {
+    let catalog;
+    try {
+      catalog = await getModelCatalog(apiKey);
+    } catch {
+      catalog = getFallbackModelCatalog();
+    }
+    const validation = validateSelectionAgainstCatalog(requestedModel, catalog);
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    modelSelection = validation.value;
+  }
+  const modelId = modelSelection.id;
+
+  if (
+    !turnId ||
+    turnId.length > 128 ||
+    !/^[A-Za-z0-9_-]+$/.test(turnId)
+  ) {
+    return NextResponse.json(
+      { error: "A valid client turn ID is required." },
+      { status: 400 }
+    );
+  }
+
+  if (recoverRunId && !agentId) {
+    return NextResponse.json(
+      { error: "An agent session is required to recover a run." },
+      { status: 400 }
+    );
   }
 
   const policy = validateAgentPolicy({
@@ -427,7 +547,8 @@ export async function POST(request: Request) {
       repoUrl,
       branch,
       agentMode,
-      modelId
+      modelId,
+      modelParams: modelSelection.params
     });
 
     if (!session.valid) {
@@ -443,7 +564,7 @@ export async function POST(request: Request) {
 
   const sdkImages = chatImagesToSdk(parseChatImages(body.images));
 
-  if (!prompt && sdkImages.length === 0) {
+  if (!recoverRunId && !prompt && sdkImages.length === 0) {
     return NextResponse.json({ error: "A prompt or image is required." }, { status: 400 });
   }
 
@@ -526,25 +647,28 @@ export async function POST(request: Request) {
       const terminateRun = (reason: TerminationReason) => {
         if (terminationPromise) return terminationPromise;
 
-        if (reason === "timeout") {
-          send("error", {
-            message: `The Cursor agent run timed out after ${formatTimeoutSeconds(runTimeoutMs)} seconds.`
-          });
-        }
-
-        terminationPromise = terminateAgentRun({
-          reason,
-          run: currentRun,
-          closeStream,
-          disposeAgent,
-          releaseSlot,
-          onError(operation, error) {
-            console.error(
-              `Failed to ${operation} ${reason === "abort" ? "aborted" : "timed out"} Cursor agent${operation === "cancel" ? " run" : ""}.`,
-              error
-            );
+        if (reason === "abort" || reason === "timeout") {
+          // Transport loss and route deadlines detach from durable cloud work.
+          // Explicit user cancellation is handled separately; cancelling here
+          // would make the emitted run identity impossible to recover.
+          if (reason === "timeout") {
+            send("error", {
+              message: `The connection to the Cursor run timed out after ${formatTimeoutSeconds(runTimeoutMs)} seconds. Reconnect to continue receiving this run.`,
+              runId: currentRun?.id,
+              retryable: true
+            });
           }
-        }).then(() => undefined);
+          closeStream();
+          terminationPromise = (async () => {
+            try {
+              await disposeAgent();
+            } catch (error) {
+              console.error("Failed to dispose detached Cursor agent.", error);
+            }
+            await releaseSlot();
+          })();
+          return terminationPromise;
+        }
 
         return terminationPromise;
       };
@@ -568,22 +692,31 @@ export async function POST(request: Request) {
           branch,
           agentMode,
           modelId,
+          modelSelection,
           promptText,
           sdkImages,
           agentId,
           agentSessionToken,
+          turnId,
           send
         };
 
-        const started = agentId
-          ? await startFollowUpRun(runContext)
-          : await startFirstRun(runContext);
+        const started = recoverRunId
+          ? await recoverRun({ ...runContext, recoverRunId })
+          : agentId
+            ? await startFollowUpRun(runContext)
+            : await startFirstRun(runContext);
 
         disposableAgent = started.agent;
         const resolvedAgentId = started.agentId;
         const resolvedAgentSessionToken = started.agentSessionToken;
         resolvedAgentIdForLog = resolvedAgentId;
         currentRun = started.run;
+        send("run", {
+          agentId: resolvedAgentId,
+          agentSessionToken: resolvedAgentSessionToken,
+          runId: started.run.id
+        });
 
         if (request.signal.aborted) {
           // The request may have been aborted while Agent.create/resume was
@@ -602,8 +735,10 @@ export async function POST(request: Request) {
           normalizeTokenUsage(result.usage) ?? streamTelemetry.usage;
 
         if (result.status === "error") {
+          const runError =
+            result.error?.message || "The Cursor agent run failed before finishing.";
           logCursorFailure({
-            error: "The Cursor agent run failed before finishing.",
+            error: runError,
             agentId: resolvedAgentId,
             run: started.run,
             runId: result.id,
@@ -614,7 +749,8 @@ export async function POST(request: Request) {
             branch
           });
           send("error", {
-            message: "The Cursor agent run failed before finishing.",
+            message: runError,
+            code: result.error?.code,
             runId: result.id,
             requestId
           });
@@ -671,7 +807,7 @@ export async function POST(request: Request) {
           model: modelIdFromResult(result, started.run)
         });
       } catch (error) {
-        if (error instanceof CursorAgentError) {
+        if (error instanceof CursorSdkError) {
           const requestId = requestIdFrom(error, currentRun);
           logCursorFailure({
             error,

@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import type { ModelParameterValue } from "@cursor/sdk";
 import { DEFAULT_MODEL_ID, type AgentMode, type ModelId } from "@/lib/defaults";
+import { modelSelectionKey } from "@/lib/model-catalog";
 
 const CONFIGURED_SIGNING_SECRET =
   process.env.ASKCURSOR_AGENT_SESSION_SECRET ||
@@ -18,12 +20,13 @@ const SIGNING_SECRET =
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 type AgentSessionClaims = {
-  v: 1;
+  v: 1 | 2;
   agentId: string;
   repoUrl: string;
   branch: string;
   agentMode: AgentMode;
   modelId?: ModelId;
+  modelKey?: string;
   apiKeyHash: string;
   expiresAt: number;
 };
@@ -34,6 +37,7 @@ export type AgentSessionContext = {
   branch: string;
   agentMode: AgentMode;
   modelId: ModelId;
+  modelParams?: ModelParameterValue[];
   apiKey: string;
 };
 
@@ -85,13 +89,18 @@ export function createAgentSessionToken(
   context: AgentSessionContext,
   ttlMs = DEFAULT_SESSION_TTL_MS
 ) {
+  const modelId = context.modelId || DEFAULT_MODEL_ID;
   const claims: AgentSessionClaims = {
-    v: 1,
+    v: 2,
     agentId: normalizeString(context.agentId),
     repoUrl: normalizeRepoUrl(context.repoUrl),
     branch: normalizeBranch(context.branch),
     agentMode: context.agentMode,
-    modelId: context.modelId,
+    modelId,
+    modelKey: modelSelectionKey({
+      id: modelId,
+      ...(context.modelParams?.length ? { params: context.modelParams } : {})
+    }),
     apiKeyHash: apiKeyHash(context.apiKey),
     expiresAt: Date.now() + ttlMs
   };
@@ -123,7 +132,7 @@ export function verifyAgentSessionToken(
     return { valid: false as const, reason: "Invalid agent session token." };
   }
 
-  if (claims.v !== 1 || Date.now() > claims.expiresAt) {
+  if ((claims.v !== 1 && claims.v !== 2) || Date.now() > claims.expiresAt) {
     return { valid: false as const, reason: "Expired agent session token." };
   }
 
@@ -133,6 +142,10 @@ export function verifyAgentSessionToken(
     branch: normalizeBranch(expected.branch),
     agentMode: expected.agentMode,
     modelId: expected.modelId,
+    modelKey: modelSelectionKey({
+      id: expected.modelId,
+      ...(expected.modelParams?.length ? { params: expected.modelParams } : {})
+    }),
     apiKeyHash: apiKeyHash(expected.apiKey)
   };
 
@@ -144,6 +157,9 @@ export function verifyAgentSessionToken(
     claims.branch !== expectedClaims.branch ||
     claims.agentMode !== expectedClaims.agentMode ||
     claimsModelId !== expectedClaims.modelId ||
+    (claims.v === 1
+      ? Boolean(expected.modelParams?.length)
+      : claims.modelKey !== expectedClaims.modelKey) ||
     claims.apiKeyHash !== expectedClaims.apiKeyHash
   ) {
     return {

@@ -163,6 +163,24 @@ describe("conversationReducer", () => {
     expect(current.conversations[0].messages[1].error).toBe(true);
   });
 
+  it("persists early agent session identity without replacing stream messages", () => {
+    const current = conversationReducer(state(), {
+      type: "replace-messages",
+      conversationId: "chat",
+      messages: [userMessage, assistantMessage]
+    });
+    const next = conversationReducer(current, {
+      type: "patch-agent-session",
+      conversationId: "chat",
+      agentId: "agent",
+      agentSessionToken: "token"
+    });
+
+    expect(next.conversations[0].agentId).toBe("agent");
+    expect(next.conversations[0].agentSessionToken).toBe("token");
+    expect(next.conversations[0].messages).toEqual([userMessage, assistantMessage]);
+  });
+
   it("deletes active conversations and falls back to the next conversation", () => {
     const second = { ...createConversation(), id: "second" };
     const current = conversationReducer(
@@ -172,5 +190,32 @@ describe("conversationReducer", () => {
 
     expect(current.conversations.map((item) => item.id)).toEqual(["second"]);
     expect(current.activeConversationId).toBe("second");
+  });
+
+  it("tracks cloud archive state and clears only cloud credentials on permanent delete", () => {
+    const initial = state();
+    initial.conversations[0].agentId = "bc-agent";
+    initial.conversations[0].agentSessionToken = "token";
+
+    const archived = conversationReducer(initial, {
+      type: "patch-agent-lifecycle",
+      conversationId: "chat",
+      archived: true
+    });
+    expect(archived.conversations[0].agentArchived).toBe(true);
+    expect(archived.conversations[0].messages).toEqual(
+      initial.conversations[0].messages
+    );
+
+    const deleted = conversationReducer(archived, {
+      type: "patch-agent-lifecycle",
+      conversationId: "chat",
+      deleted: true
+    });
+    expect(deleted.conversations[0].agentId).toBeUndefined();
+    expect(deleted.conversations[0].agentSessionToken).toBeUndefined();
+    expect(deleted.conversations[0].messages).toEqual(
+      initial.conversations[0].messages
+    );
   });
 });

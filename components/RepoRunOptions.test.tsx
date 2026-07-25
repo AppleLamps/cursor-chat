@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RepoRunOptions from "@/components/RepoRunOptions";
+import { FALLBACK_MODEL_CATALOG } from "@/lib/model-client";
 
 afterEach(cleanup);
 
@@ -14,7 +15,8 @@ describe("RepoRunOptions", () => {
       <RepoRunOptions
         allowModeSelection
         agentMode="qa"
-        modelId="composer-2.5"
+        model={{ id: "composer-2.5" }}
+        models={FALLBACK_MODEL_CATALOG}
         onAgentModeChange={onAgentModeChange}
         onModelChange={onModelChange}
       />
@@ -24,7 +26,7 @@ describe("RepoRunOptions", () => {
     fireEvent.click(view.getByRole("button", { name: /Grok 4.5 High/ }));
 
     expect(onAgentModeChange).toHaveBeenCalledWith("plan");
-    expect(onModelChange).toHaveBeenCalledWith("grok-4.5");
+    expect(onModelChange).toHaveBeenCalledWith({ id: "grok-4.5" });
   });
 
   it("hides write-mode selection when mode changes are locked", () => {
@@ -32,7 +34,8 @@ describe("RepoRunOptions", () => {
       <RepoRunOptions
         allowModeSelection={false}
         agentMode="qa"
-        modelId="composer-2.5"
+        model={{ id: "composer-2.5" }}
+        models={FALLBACK_MODEL_CATALOG}
         onAgentModeChange={vi.fn()}
         onModelChange={vi.fn()}
       />
@@ -40,5 +43,43 @@ describe("RepoRunOptions", () => {
 
     expect(view.queryByRole("button", { name: /Implement/ })).toBeNull();
     expect(view.getByRole("button", { name: /Composer 2.5/ })).toBeTruthy();
+  });
+
+  it("renders catalog parameters and returns the canonical SDK selection", () => {
+    const onModelChange = vi.fn();
+    const models = [{
+      id: "cursor-router",
+      displayName: "Cursor Router",
+      aliases: ["auto"],
+      parameters: [{
+        id: "mode",
+        displayName: "Optimization",
+        values: [
+          { value: "cost", displayName: "Cost" },
+          { value: "intelligence", displayName: "Intelligence" }
+        ]
+      }],
+      variants: [],
+      model: { id: "cursor-router", params: [{ id: "mode", value: "cost" }] }
+    }];
+    const view = render(
+      <RepoRunOptions
+        allowModeSelection={false}
+        agentMode="qa"
+        model={models[0].model}
+        models={models}
+        onAgentModeChange={vi.fn()}
+        onModelChange={onModelChange}
+      />
+    );
+
+    fireEvent.change(view.getByLabelText("Optimization"), {
+      target: { value: "intelligence" }
+    });
+
+    expect(onModelChange).toHaveBeenCalledWith({
+      id: "cursor-router",
+      params: [{ id: "mode", value: "intelligence" }]
+    });
   });
 });

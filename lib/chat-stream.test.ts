@@ -24,6 +24,38 @@ function streamResponse(chunks: string[]) {
 }
 
 describe("consumeChatStream", () => {
+  it("exposes early durable run identity before completion", async () => {
+    let run:
+      | { agentId: string; agentSessionToken?: string; runId: string }
+      | undefined;
+
+    await consumeChatStream(
+      streamResponse([
+        formatSseEvent("run", {
+          agentId: "agent",
+          agentSessionToken: "token",
+          runId: "run"
+        }),
+        formatSseEvent("done", {
+          agentId: "agent",
+          runId: "run",
+          status: "finished"
+        })
+      ]),
+      {
+        onRun: (payload) => {
+          run = payload;
+        }
+      }
+    );
+
+    expect(run).toEqual({
+      agentId: "agent",
+      agentSessionToken: "token",
+      runId: "run"
+    });
+  });
+
   it("parses done telemetry fields", async () => {
     let donePayload: ChatStreamDone | undefined;
 
@@ -84,6 +116,41 @@ describe("consumeChatStream", () => {
       status: 404,
       retryable: false
     } satisfies Partial<ChatStreamError>);
+  });
+
+  it("renders safe task and tool diagnostics without exposing payloads", async () => {
+    const activities: string[] = [];
+
+    await consumeChatStream(
+      streamResponse([
+        formatSseEvent("task", {
+          status: "running",
+          text: "secret repository instructions"
+        }),
+        formatSseEvent("tool", {
+          name: "grep",
+          status: "error",
+          argsTruncated: true,
+          resultTruncated: true,
+          args: { token: "secret" },
+          result: "secret output"
+        }),
+        formatSseEvent("done", {
+          agentId: "agent",
+          runId: "run",
+          status: "finished"
+        })
+      ]),
+      {
+        onActivity: (activity) => activities.push(activity)
+      }
+    );
+
+    expect(activities).toEqual([
+      "Working on a delegated task…",
+      "Tool grep failed (details truncated)"
+    ]);
+    expect(activities.join(" ")).not.toContain("secret");
   });
 
   it("throws when an SSE event contains malformed JSON", async () => {

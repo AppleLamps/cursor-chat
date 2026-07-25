@@ -1,24 +1,31 @@
 "use client";
 
 import { isImplementMode } from "@/lib/agent-mode";
+import { type AgentMode } from "@/lib/defaults";
 import {
-  AVAILABLE_MODELS,
-  type AgentMode,
-  type ModelId
-} from "@/lib/defaults";
+  modelSelectionsEqual,
+  type ModelCatalogEntry,
+  type ModelSelection
+} from "@/lib/model-client";
 
 export default function RepoRunOptions({
   allowModeSelection,
   agentMode,
-  modelId,
+  model,
+  models,
+  modelsLoading,
+  usingFallback,
   onAgentModeChange,
   onModelChange
 }: {
   allowModeSelection: boolean;
   agentMode: AgentMode;
-  modelId: ModelId;
+  model: ModelSelection;
+  models: ModelCatalogEntry[];
+  modelsLoading?: boolean;
+  usingFallback?: boolean;
   onAgentModeChange: (mode: AgentMode) => void;
-  onModelChange: (modelId: ModelId) => void;
+  onModelChange: (model: ModelSelection) => void;
 }) {
   return (
     <>
@@ -56,18 +63,109 @@ export default function RepoRunOptions({
       ) : null}
 
       <fieldset className="mt-5">
-        <legend className="text-sm font-medium text-[#333]">Model</legend>
+        <legend className="text-sm font-medium text-[#333]">
+          Model {modelsLoading ? <span className="font-normal text-[#8a8a8a]">· loading…</span> : null}
+        </legend>
+        {usingFallback ? (
+          <p className="mt-1 text-xs text-[#8a8a8a]">
+            Showing fallback models while the Cursor catalog is unavailable.
+          </p>
+        ) : null}
         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {AVAILABLE_MODELS.map((model) => (
-            <Option
-              key={model.id}
-              selected={modelId === model.id}
-              title={model.label}
-              description={model.description}
-              onSelect={() => onModelChange(model.id)}
-            />
-          ))}
+          {models.map((catalogModel) => {
+            const selection = catalogModel.model;
+            return (
+              <Option
+                key={catalogModel.id}
+                selected={model.id === catalogModel.id}
+                title={catalogModel.displayName}
+                description={catalogModel.description}
+                onSelect={() => onModelChange(selection)}
+              />
+            );
+          })}
         </div>
+        {!models.some((entry) => entry.id === model.id) ? (
+          <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Previously selected model “{model.id}” is unavailable. Choose another
+            model before continuing.
+          </p>
+        ) : null}
+        {models.find((entry) => entry.id === model.id)?.variants?.length ? (
+          <div className="mt-3">
+            <label className="text-xs font-medium text-[#555]" htmlFor="model-variant">
+              Variant
+            </label>
+            <select
+              id="model-variant"
+              value={String(
+                models
+                  .find((entry) => entry.id === model.id)
+                  ?.variants.findIndex((variant) =>
+                    modelSelectionsEqual({ id: model.id, params: variant.params }, model)
+                  ) ?? -1
+              )}
+              onChange={(event) => {
+                const selected = models
+                  .find((entry) => entry.id === model.id)
+                  ?.variants[Number(event.target.value)];
+                if (selected) onModelChange({ id: model.id, params: selected.params });
+              }}
+              className="mt-1 w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm"
+            >
+              <option value="-1" disabled>Select a variant</option>
+              {models.find((entry) => entry.id === model.id)?.variants.map((variant, index) => (
+                <option key={`${variant.displayName}-${index}`} value={index}>{variant.displayName}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          models.find((entry) => entry.id === model.id)?.parameters?.map((parameter) => (
+            <div key={parameter.id} className="mt-3">
+              <label className="text-xs font-medium text-[#555]" htmlFor={`model-param-${parameter.id}`}>
+                {parameter.displayName ?? parameter.id}
+              </label>
+              <select
+                id={`model-param-${parameter.id}`}
+                value={
+                  model.params?.find((entry) => entry.id === parameter.id)?.value ??
+                  ""
+                }
+                onChange={(event) => {
+                  if (!event.target.value) {
+                    const remaining = (model.params ?? []).filter(
+                      (entry) => entry.id !== parameter.id
+                    );
+                    onModelChange({
+                      id: model.id,
+                      ...(remaining.length ? { params: remaining } : {})
+                    });
+                    return;
+                  }
+                  const option = parameter.values.find(
+                    (candidate) => candidate.value === event.target.value
+                  );
+                  if (!option) return;
+                  onModelChange({
+                    id: model.id,
+                    params: [
+                      ...(model.params ?? []).filter((entry) => entry.id !== parameter.id),
+                      { id: parameter.id, value: option.value }
+                    ]
+                  });
+                }}
+                className="mt-1 w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm"
+              >
+                <option value="">Use Cursor default</option>
+                {parameter.values.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.displayName ?? option.value}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))
+        )}
       </fieldset>
     </>
   );
@@ -81,7 +179,7 @@ function Option({
 }: {
   selected: boolean;
   title: string;
-  description: string;
+  description?: string;
   onSelect: () => void;
 }) {
   return (
@@ -96,9 +194,11 @@ function Option({
       }`}
     >
       <span className="block text-sm font-medium text-[#202123]">{title}</span>
-      <span className="mt-1 block text-xs leading-5 text-[#8a8a8a]">
-        {description}
-      </span>
+      {description ? (
+        <span className="mt-1 block text-xs leading-5 text-[#8a8a8a]">
+          {description}
+        </span>
+      ) : null}
     </button>
   );
 }

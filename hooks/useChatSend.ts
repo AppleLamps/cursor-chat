@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject, useCallback, useState } from "react";
+import { RefObject, useCallback, useRef, useState } from "react";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { ChatStreamError, consumeChatStream } from "@/lib/chat-stream";
 import { MAX_CHAT_IMAGES } from "@/lib/chat-images";
@@ -15,9 +15,11 @@ import type {
   Message,
   PdfAttachment
 } from "@/lib/chat-types";
+import type { ModelSelection } from "@/lib/model-client";
 import {
   conversationTranscript,
   resolveConversationModelId,
+  resolveConversationModel,
   titleFromMessages,
   uid
 } from "@/lib/chat-conversation";
@@ -48,12 +50,28 @@ type UseChatSendOptions = {
     messageId: string,
     patch: Partial<Message>
   ) => void;
+  patchAgentSessionForConversation: (
+    conversationId: string,
+    agentId: string,
+    agentSessionToken?: string
+  ) => void;
   mergeSourceForConversation: (
     conversationId: string,
     messageId: string,
     source: string
   ) => void;
   setExternalSyncPaused: (paused: boolean) => void;
+};
+
+type ActiveRunIdentity = {
+  agentId: string;
+  agentSessionToken?: string;
+  runId: string;
+  repoUrl: string;
+  branch: string;
+  agentMode: AgentMode;
+  modelId: string;
+  model: ModelSelection;
 };
 
 export function useChatSend({
@@ -69,6 +87,7 @@ export function useChatSend({
   activeConversationIdRef,
   replaceMessagesForConversation,
   patchMessageForConversation,
+  patchAgentSessionForConversation,
   mergeSourceForConversation,
   setExternalSyncPaused
 }: UseChatSendOptions) {
@@ -77,19 +96,31 @@ export function useChatSend({
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const activeRunRef = useRef<ActiveRunIdentity | null>(null);
   const { beginRequest, clearRequest, stopRequest } =
     useAgentRequestController();
 
   const stopGenerating = useCallback(() => {
+    const activeRun = activeRunRef.current;
+    if (activeRun && apiKey) {
+      void fetch("/api/chat/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, ...activeRun }),
+        keepalive: true
+      }).catch(() => undefined);
+      activeRunRef.current = null;
+    }
     if (stopRequest()) setComposerNote("Agent run stopped.");
-  }, [stopRequest]);
+  }, [apiKey, stopRequest]);
 
   const sendMessage = useCallback(
     async (
       content: string,
       retry = false,
       baseMessages = messages,
-      retryAttachments?: Pick<Message, "imageAttachments" | "pdfAttachments">
+      retryAttachments?: Pick<Message, "imageAttachments" | "pdfAttachments">,
+      recovery?: Pick<Message, "runId" | "turnId">
     ) => {
       const trimmed = content.trim();
       const imagesForMessage = retry
@@ -132,6 +163,7 @@ export function useChatSend({
         activeConversation.agentSessionToken;
       const conversationAgentMode = activeAgentMode;
       const conversationModelId = resolveConversationModelId(activeConversation);
+      const conversationModel = resolveConversationModel(activeConversation);
 
       if (pdfsForMessage.length > 0) {
         setError("PDF attachments are not supported. Use images or text.");
@@ -161,6 +193,12 @@ export function useChatSend({
       setIsSending(true);
       setExternalSyncPaused(true);
 
+      const turnId = retry
+        ? recovery?.turnId ??
+          [...baseMessages].reverse().find((message) => message.role === "user")
+            ?.turnId ??
+          uid()
+        : uid();
       const userMessage: Message = {
         id: uid(),
         role: "user",
@@ -168,12 +206,21 @@ export function useChatSend({
         createdAt: new Date().toISOString(),
         imageAttachments:
           imagesForMessage.length > 0 ? imagesForMessage : undefined,
-        pdfAttachments: pdfsForMessage.length > 0 ? pdfsForMessage : undefined
+        pdfAttachments: pdfsForMessage.length > 0 ? pdfsForMessage : undefined,
+        turnId
       };
 
       const cleanMessages = baseMessages.filter((message) => !message.error);
+      const retriedUserMessageId = retry
+        ? [...cleanMessages].reverse().find((message) => message.role === "user")
+            ?.id
+        : undefined;
       const optimisticMessages = retry
-        ? cleanMessages
+        ? cleanMessages.map((message) =>
+            message.id === retriedUserMessageId && !message.turnId
+              ? { ...message, turnId }
+              : message
+          )
         : [...cleanMessages, userMessage];
 
       replaceMessagesForConversation(conversationId, optimisticMessages);
@@ -202,7 +249,8 @@ export function useChatSend({
         createdAt: new Date().toISOString(),
         streaming: true,
         activity: assistantActivity,
-        activityLog: [assistantActivity]
+        activityLog: [assistantActivity],
+        turnId
       };
 
       replaceMessagesForConversation(conversationId, [
@@ -236,11 +284,14 @@ export function useChatSend({
             agentSessionToken: conversationAgentSessionToken,
             agentMode: conversationAgentMode,
             modelId: conversationModelId,
+            model: conversationModel,
             implementConfirmed,
             images: imagesForMessage.map((image) => ({
               url: image.url,
               mimeType: image.mimeType
-            }))
+            })),
+            turnId,
+            recoverRunId: recovery?.runId
           }),
           signal: requestController.signal
         });
@@ -262,6 +313,36 @@ export function useChatSend({
             if (agentSessionTokenFromStream) {
               resolvedAgentSessionToken = agentSessionTokenFromStream;
             }
+            patchAgentSessionForConversation(
+              conversationId,
+              agentIdFromStream,
+              agentSessionTokenFromStream
+            );
+          },
+          onRun: (payload) => {
+            resolvedAgentId = payload.agentId;
+            resolvedAgentSessionToken =
+              payload.agentSessionToken ?? resolvedAgentSessionToken;
+            assistantRunId = payload.runId;
+            activeRunRef.current = {
+              agentId: payload.agentId,
+              agentSessionToken: payload.agentSessionToken,
+              runId: payload.runId,
+              repoUrl: conversationRepoUrl,
+              branch: conversationBranch,
+              agentMode: conversationAgentMode,
+              modelId: conversationModelId,
+              model: conversationModel
+            };
+            patchAgentSessionForConversation(
+              conversationId,
+              payload.agentId,
+              payload.agentSessionToken
+            );
+            patchMessageForConversation(conversationId, assistantId, {
+              runId: payload.runId,
+              turnId
+            });
           },
           onText: (delta) => {
             assistantContent += delta;
@@ -326,7 +407,8 @@ export function useChatSend({
           requestId: assistantRequestId,
           durationMs: assistantDurationMs,
           usage: assistantUsage,
-          modelId: assistantModelId
+          modelId: assistantModelId,
+          turnId
         };
         const finalMessages = [...optimisticMessages, assistantMessage];
         replaceMessagesForConversation(
@@ -362,16 +444,27 @@ export function useChatSend({
           createdAt: streamingAssistant.createdAt,
           error: true,
           streaming: false,
-          runId: caught instanceof ChatStreamError ? caught.runId : undefined,
+          runId:
+            (caught instanceof ChatStreamError ? caught.runId : undefined) ??
+            assistantRunId,
           requestId:
-            caught instanceof ChatStreamError ? caught.requestId : undefined
+            caught instanceof ChatStreamError ? caught.requestId : undefined,
+          turnId
         };
         const finalMessages = [...optimisticMessages, errorMessage];
         if (activeConversationIdRef.current === conversationId) {
           setError(message);
         }
-        replaceMessagesForConversation(conversationId, finalMessages, null, null);
+        replaceMessagesForConversation(
+          conversationId,
+          finalMessages,
+          resolvedAgentId,
+          resolvedAgentSessionToken
+        );
       } finally {
+        if (activeRunRef.current?.runId === assistantRunId) {
+          activeRunRef.current = null;
+        }
         clearRequest(requestController);
         setExternalSyncPaused(false);
         setIsSending(false);
@@ -392,6 +485,7 @@ export function useChatSend({
       messages,
       openRepoPicker,
       patchMessageForConversation,
+      patchAgentSessionForConversation,
       pendingImages,
       pendingPdfs,
       replaceMessagesForConversation,
@@ -421,6 +515,9 @@ export function useChatSend({
       void sendMessage(previousUserMessage.content, true, nextMessages, {
         imageAttachments: previousUserMessage.imageAttachments,
         pdfAttachments: previousUserMessage.pdfAttachments
+      }, {
+        runId: messages[messageIndex]?.runId,
+        turnId: previousUserMessage.turnId
       });
     },
     [activeConversation, messages, replaceMessagesForConversation, sendMessage]
@@ -431,9 +528,15 @@ export function useChatSend({
       .reverse()
       .find((message) => message.role === "user");
     if (!lastUserMessage) return;
+    const lastAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
     void sendMessage(lastUserMessage.content, true, messages, {
       imageAttachments: lastUserMessage.imageAttachments,
       pdfAttachments: lastUserMessage.pdfAttachments
+    }, {
+      runId: lastAssistantMessage?.error ? lastAssistantMessage.runId : undefined,
+      turnId: lastUserMessage.turnId
     });
   }, [messages, sendMessage]);
 

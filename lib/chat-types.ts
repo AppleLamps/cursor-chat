@@ -1,4 +1,5 @@
 import type { AgentMode, ModelId } from "@/lib/defaults";
+import type { ModelSelection } from "@/lib/model-client";
 
 export type Role = "user" | "assistant";
 
@@ -45,6 +46,8 @@ export type Message = {
   durationMs?: number;
   usage?: ChatTokenUsage;
   modelId?: string;
+  /** Stable identity for one user turn and all retries of that turn. */
+  turnId?: string;
 };
 
 export type Conversation = {
@@ -58,8 +61,12 @@ export type Conversation = {
   branch?: string;
   agentId?: string;
   agentSessionToken?: string;
+  /** Last lifecycle state explicitly set through this app. */
+  agentArchived?: boolean;
   agentMode?: AgentMode;
   modelId?: ModelId;
+  /** Canonical SDK model selection. modelId remains for legacy storage. */
+  model?: ModelSelection;
 };
 
 export type RepoPickerMode = "initial" | "new-chat" | "change";

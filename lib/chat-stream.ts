@@ -1,4 +1,8 @@
-import { parseSseBuffer, toolActivityLabel } from "@/lib/sse";
+import {
+  parseSseBuffer,
+  taskActivityLabel,
+  toolActivityLabel
+} from "@/lib/sse";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 import type { ChatTokenUsage } from "@/lib/chat-types";
 
@@ -45,6 +49,11 @@ export class ChatStreamError extends Error {
 
 export type ChatStreamHandlers = {
   onAgent?: (agentId: string, agentSessionToken?: string) => void;
+  onRun?: (payload: {
+    agentId: string;
+    agentSessionToken?: string;
+    runId: string;
+  }) => void;
   onText?: (delta: string) => void;
   onThinking?: (payload: { delta?: string; text?: string }) => void;
   onActivity?: (activity: string) => void;
@@ -79,6 +88,21 @@ export async function consumeChatStream(
 
     for (const { event, data } of parsed.events) {
       switch (event) {
+        case "run": {
+          const agentId = data.agentId;
+          const runId = data.runId;
+          if (typeof agentId === "string" && typeof runId === "string") {
+            handlers.onRun?.({
+              agentId,
+              runId,
+              agentSessionToken:
+                typeof data.agentSessionToken === "string"
+                  ? data.agentSessionToken
+                  : undefined
+            });
+          }
+          break;
+        }
         case "agent": {
           const agentId = data.agentId;
           if (typeof agentId === "string") {
@@ -116,8 +140,21 @@ export async function consumeChatStream(
           const name = data.name;
           const status = data.status;
           if (typeof name === "string" && typeof status === "string") {
-            handlers.onActivity?.(toolActivityLabel(name, status));
+            handlers.onActivity?.(
+              toolActivityLabel(name, status, {
+                argsTruncated: data.argsTruncated === true,
+                resultTruncated: data.resultTruncated === true
+              })
+            );
           }
+          break;
+        }
+        case "task": {
+          handlers.onActivity?.(
+            taskActivityLabel(
+              typeof data.status === "string" ? data.status : undefined
+            )
+          );
           break;
         }
         case "source": {

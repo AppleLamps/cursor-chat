@@ -16,6 +16,8 @@ import { roleLabel, timeLabel } from "@/lib/chat-conversation";
 import { formatTokenUsage, telemetryTitle } from "@/lib/chat-telemetry";
 import { githubBlobUrl } from "@/lib/sources";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
+import ArtifactsPanel from "@/components/chat/ArtifactsPanel";
+import type { Conversation } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import {
   Attachment,
@@ -40,7 +42,8 @@ export default function MessageBubble({
   branch,
   copied,
   onCopy,
-  onRetry
+  onRetry,
+  artifactScope
 }: {
   message: Message;
   repoUrl?: string;
@@ -48,6 +51,10 @@ export default function MessageBubble({
   copied: boolean;
   onCopy: () => void;
   onRetry: () => void;
+  artifactScope?: {
+    apiKey: string;
+    conversation: Conversation;
+  };
 }) {
   const isUser = message.role === "user";
   const imageAttachments = message.imageAttachments || [];
@@ -141,6 +148,28 @@ export default function MessageBubble({
                 sources={message.sources}
                 repoUrl={repoUrl}
                 branch={branch || DEFAULT_BRANCH}
+              />
+            ) : null}
+            {!isUser &&
+            !message.error &&
+            !isStreaming &&
+            artifactScope?.apiKey &&
+            artifactScope.conversation.agentId &&
+            artifactScope.conversation.agentSessionToken &&
+            artifactScope.conversation.repoUrl ? (
+              <ArtifactsPanel
+                scope={{
+                  apiKey: artifactScope.apiKey,
+                  agentId: artifactScope.conversation.agentId,
+                  agentSessionToken: artifactScope.conversation.agentSessionToken,
+                  repoUrl: artifactScope.conversation.repoUrl,
+                  branch: artifactScope.conversation.branch || DEFAULT_BRANCH,
+                  agentMode: artifactScope.conversation.agentMode || "qa",
+                  model:
+                    artifactScope.conversation.model || {
+                      id: artifactScope.conversation.modelId || "composer-2.5"
+                    }
+                }}
               />
             ) : null}
             {!isUser && hasPdfAttachments ? (

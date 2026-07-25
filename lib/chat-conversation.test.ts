@@ -86,7 +86,7 @@ describe("chat conversation helpers", () => {
     const normalized = normalizeConversation(conversation);
 
     expect(normalized.agentMode).toBe("qa");
-    expect(normalized.modelId).toBe("composer-2.5");
+    expect(normalized.modelId).toBe("bad-model");
     expect("systemPrompt" in normalized).toBe(false);
   });
 

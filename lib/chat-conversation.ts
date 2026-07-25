@@ -8,6 +8,11 @@ import {
   type ModelId
 } from "@/lib/defaults";
 import type { Conversation, Message, Role } from "@/lib/chat-types";
+import {
+  DEFAULT_MODEL_SELECTION,
+  normalizeModelSelection,
+  type ModelSelection
+} from "@/lib/model-client";
 
 export function uid() {
   if (globalThis.crypto?.randomUUID) {
@@ -52,11 +57,26 @@ export function resolveConversationModelId(
   return parseModelId(conversation?.modelId);
 }
 
+export function resolveConversationModel(
+  conversation?: Conversation | null
+): ModelSelection {
+  if (
+    conversation?.modelId &&
+    conversation.model &&
+    !conversation.model.params?.length &&
+    conversation.model.id !== conversation.modelId
+  ) {
+    return { id: parseModelId(conversation.modelId) };
+  }
+  return normalizeModelSelection(conversation?.model, conversation?.modelId);
+}
+
 export function createConversation(
   repoUrl?: string,
   branch?: string,
   agentMode: AgentMode = DEFAULT_AGENT_MODE,
-  modelId: ModelId = DEFAULT_MODEL_ID
+  modelId: ModelId = DEFAULT_MODEL_ID,
+  model: ModelSelection = { id: modelId }
 ): Conversation {
   const now = new Date().toISOString();
 
@@ -69,7 +89,8 @@ export function createConversation(
     repoUrl,
     branch: branch || DEFAULT_BRANCH,
     agentMode,
-    modelId
+    modelId: model.id,
+    model
   };
 }
 
@@ -134,7 +155,8 @@ export function normalizeConversation(conversation: Conversation): Conversation 
   return {
     ...stripPrivateConversationFields(conversation),
     agentMode: parseAgentMode(conversation.agentMode),
-    modelId: parseModelId(conversation.modelId)
+    modelId: resolveConversationModel(conversation).id,
+    model: resolveConversationModel(conversation)
   };
 }
 
@@ -169,6 +191,7 @@ export function withPersistedMessages(
     repoUrl: conversation.repoUrl,
     branch: conversation.branch,
     modelId: resolveConversationModelId(conversation),
+    model: resolveConversationModel(conversation),
     agentId:
       nextAgentId === null ? undefined : nextAgentId ?? conversation.agentId,
     agentSessionToken:

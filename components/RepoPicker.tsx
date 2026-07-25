@@ -13,6 +13,12 @@ import {
   type ModelId
 } from "@/lib/defaults";
 import { RepoOption, filterRepos, repoLabel } from "@/lib/repo";
+import {
+  FALLBACK_MODEL_CATALOG,
+  normalizeModelSelection,
+  type ModelCatalogEntry,
+  type ModelSelection
+} from "@/lib/model-client";
 
 type RepoPickerProps = {
   repos: RepoOption[];
@@ -22,6 +28,10 @@ type RepoPickerProps = {
   initialBranch?: string;
   initialAgentMode?: AgentMode;
   initialModelId?: ModelId;
+  initialModel?: ModelSelection;
+  models?: ModelCatalogEntry[];
+  modelsLoading?: boolean;
+  usingFallbackModels?: boolean;
   allowModeSelection?: boolean;
   githubToken?: string | null;
   title?: string;
@@ -35,7 +45,7 @@ type RepoPickerProps = {
     branch: string,
     rememberAsDefault: boolean,
     agentMode: AgentMode,
-    modelId: ModelId
+    model: ModelSelection
   ) => void;
   onCancel?: () => void;
 };
@@ -48,6 +58,10 @@ export default function RepoPicker({
   initialBranch = DEFAULT_BRANCH,
   initialAgentMode = DEFAULT_AGENT_MODE,
   initialModelId = DEFAULT_MODEL_ID,
+  initialModel,
+  models = FALLBACK_MODEL_CATALOG,
+  modelsLoading,
+  usingFallbackModels,
   allowModeSelection = true,
   githubToken,
   title = "Choose a repository",
@@ -62,7 +76,9 @@ export default function RepoPicker({
   const [selectedRepoUrl, setSelectedRepoUrl] = useState(initialRepoUrl ?? "");
   const [branch, setBranch] = useState(initialBranch);
   const [agentMode, setAgentMode] = useState<AgentMode>(initialAgentMode);
-  const [modelId, setModelId] = useState<ModelId>(initialModelId);
+  const [model, setModel] = useState<ModelSelection>(
+    normalizeModelSelection(initialModel ?? initialModelId)
+  );
   const [rememberAsDefault, setRememberAsDefault] = useState(allowModeSelection);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -114,7 +130,7 @@ export default function RepoPicker({
       return;
     }
 
-    onSelect(repoUrl, branchName, rememberAsDefault, agentMode, modelId);
+    onSelect(repoUrl, branchName, rememberAsDefault, agentMode, model);
   }
 
   const form = (
@@ -236,9 +252,12 @@ export default function RepoPicker({
           <RepoRunOptions
             allowModeSelection={allowModeSelection}
             agentMode={agentMode}
-            modelId={modelId}
+            model={model}
+            models={models}
+            modelsLoading={modelsLoading}
+            usingFallback={usingFallbackModels}
             onAgentModeChange={setAgentMode}
-            onModelChange={setModelId}
+            onModelChange={setModel}
           />
 
           <BranchPicker
