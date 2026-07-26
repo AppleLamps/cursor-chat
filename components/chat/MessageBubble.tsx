@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
-  CheckCircle2Icon,
   ChevronDownIcon,
-  CircleDotDashedIcon,
   CopyIcon,
   FileTextIcon,
   GitPullRequestIcon,
@@ -16,6 +14,7 @@ import { roleLabel, timeLabel } from "@/lib/chat-conversation";
 import { formatTokenUsage, telemetryTitle } from "@/lib/chat-telemetry";
 import { githubBlobUrl } from "@/lib/sources";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
+import AgentTrace from "@/components/chat/AgentTrace";
 import ArtifactsPanel from "@/components/chat/ArtifactsPanel";
 import type { Conversation } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
@@ -117,7 +116,7 @@ export default function MessageBubble({
         >
           <BubbleContent className={isUser ? undefined : "w-full"}>
             {hasTrace ? (
-              <TracePanel
+              <AgentTrace
                 content={message.thinking || ""}
                 activityLog={message.activityLog}
                 sourceCount={message.sources?.length}
@@ -242,230 +241,6 @@ function PdfAttachmentGroup({
       ))}
     </AttachmentGroup>
   );
-}
-
-function TracePanel({
-  content,
-  activityLog = [],
-  sourceCount = 0,
-  startedAt,
-  streaming
-}: {
-  content: string;
-  activityLog?: string[];
-  sourceCount?: number;
-  startedAt: string;
-  streaming?: boolean;
-}) {
-  const [open, setOpen] = useState(Boolean(streaming));
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const userToggledRef = useRef(false);
-  const previewRef = useRef<HTMLDivElement>(null);
-  const traceText = content.trim();
-  const uniqueActivityLog = activityLog.filter(
-    (item, index) => item.trim() && item !== activityLog[index - 1]
-  );
-  const currentActivity =
-    uniqueActivityLog[uniqueActivityLog.length - 1] ||
-    "Starting the Cursor cloud agent…";
-  const completedActivityLog = streaming
-    ? uniqueActivityLog.slice(0, -1)
-    : uniqueActivityLog;
-  const recentCompletedActivity = completedActivityLog.slice(-5);
-  const hiddenActivityCount =
-    completedActivityLog.length - recentCompletedActivity.length;
-
-  useEffect(() => {
-    if (!userToggledRef.current) {
-      setOpen(Boolean(streaming));
-    }
-  }, [streaming]);
-
-  useEffect(() => {
-    if (!streaming) {
-      setElapsedSeconds(0);
-      return;
-    }
-
-    const startedAtMs = Date.parse(startedAt);
-    const updateElapsed = () => {
-      setElapsedSeconds(
-        Number.isFinite(startedAtMs)
-          ? Math.max(0, Math.floor((Date.now() - startedAtMs) / 1_000))
-          : 0
-      );
-    };
-    updateElapsed();
-    const interval = window.setInterval(updateElapsed, 1_000);
-    return () => window.clearInterval(interval);
-  }, [startedAt, streaming]);
-
-  useEffect(() => {
-    if (!streaming || !open || !previewRef.current) return;
-    previewRef.current.scrollTop = previewRef.current.scrollHeight;
-  }, [content, currentActivity, streaming, open]);
-
-  return (
-    <div className="mb-4 w-full overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-      {streaming ? (
-        <div className="h-0.5 overflow-hidden bg-muted" aria-hidden="true">
-          <div className="h-full w-2/3 animate-pulse rounded-full bg-foreground/70" />
-        </div>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          userToggledRef.current = true;
-          setOpen((current) => !current);
-        }}
-        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm transition hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring/50"
-        aria-expanded={open ? "true" : "false"}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          {streaming ? (
-            <CircleDotDashedIcon className="size-4 animate-spin text-muted-foreground" />
-          ) : (
-            <CheckCircle2Icon className="size-4 text-muted-foreground" />
-          )}
-          <span className="min-w-0">
-            <span className="block font-semibold text-foreground">
-              {streaming ? "Agent is working" : "Agent work completed"}
-            </span>
-            <span
-              className="mt-0.5 block truncate text-xs font-normal text-muted-foreground"
-              aria-live="polite"
-            >
-              {streaming
-                ? currentActivity
-                : `${uniqueActivityLog.length} progress ${uniqueActivityLog.length === 1 ? "step" : "steps"}`}
-            </span>
-          </span>
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          {streaming ? (
-            <span className="rounded-full bg-muted px-2 py-1 text-[11px] tabular-nums text-muted-foreground">
-              {formatElapsedTime(elapsedSeconds)}
-            </span>
-          ) : null}
-          {sourceCount > 0 ? (
-            <span className="hidden rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground sm:inline">
-              {sourceCount} sources
-            </span>
-          ) : null}
-          <ChevronDownIcon
-            aria-hidden="true"
-            className={`size-4 text-muted-foreground transition ${open ? "rotate-180" : ""}`}
-          />
-        </span>
-      </button>
-      {open ? (
-        <div
-          ref={previewRef}
-          className="max-h-80 overflow-y-auto border-t border-border bg-muted/20 px-3 py-3"
-        >
-          {streaming ? (
-            <div
-              className="rounded-lg border border-border bg-background px-3 py-2.5"
-              role="status"
-            >
-              <div className="flex items-start gap-2.5">
-                <CircleDotDashedIcon className="mt-0.5 size-4 shrink-0 animate-spin text-foreground" />
-                <div>
-                  <p className="text-xs font-semibold text-foreground">
-                    {currentActivity}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {activityExplanation(currentActivity)}
-                  </p>
-                </div>
-              </div>
-              {elapsedSeconds >= 20 ? (
-                <p className="mt-2 border-t border-border pt-2 text-[11px] leading-4 text-muted-foreground">
-                  Still working normally. Larger repositories and code reviews can
-                  take a few minutes.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {recentCompletedActivity.length ? (
-            <div className={streaming ? "mt-3" : ""}>
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {streaming ? "Completed" : "Progress"}
-                </p>
-                {hiddenActivityCount > 0 ? (
-                  <span className="text-[11px] text-muted-foreground">
-                    +{hiddenActivityCount} earlier
-                  </span>
-                ) : null}
-              </div>
-              <ol className="space-y-1.5">
-                {recentCompletedActivity.map((item, index) => (
-                  <li key={`${item}-${index}`} className="flex gap-2 text-xs text-muted-foreground">
-                    <CheckCircle2Icon
-                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70"
-                      aria-hidden="true"
-                    />
-                    <span className="min-w-0 leading-5">{item}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-          {traceText ? (
-            <div className="mt-3 border-t border-border pt-3">
-              <p className="mb-1 text-[11px] font-semibold uppercase text-muted-foreground">
-                Reasoning summary
-              </p>
-              <p className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
-                {traceText}
-              </p>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function formatElapsedTime(seconds: number) {
-  if (seconds < 1) return "Just started";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-}
-
-function activityExplanation(activity: string) {
-  const normalized = activity.toLowerCase();
-
-  if (normalized.includes("writing") || normalized.includes("response")) {
-    return "The repository work is complete and the answer is being composed.";
-  }
-  if (normalized.includes("reasoning") || normalized.includes("thinking")) {
-    return "Reviewing the gathered evidence and deciding what matters.";
-  }
-  if (normalized.includes("waiting for the final run result")) {
-    return "Live updates ended, but the durable Cursor run is still being checked.";
-  }
-  if (normalized.startsWith("finished")) {
-    return "Processing that result and deciding the next step.";
-  }
-  if (
-    normalized.includes("reading") ||
-    normalized.includes("searching") ||
-    normalized.includes("scanning")
-  ) {
-    return "Inspecting the repository before producing an answer.";
-  }
-  if (
-    normalized.includes("command") ||
-    normalized.includes("updating") ||
-    normalized.includes("tool")
-  ) {
-    return "Operating on the repository and checking the outcome.";
-  }
-  return "The agent is connected and progress will update here.";
 }
 
 function SourcesPanel({

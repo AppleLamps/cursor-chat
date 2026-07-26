@@ -38,4 +38,52 @@ describe("MessageBubble agent progress", () => {
       ).toBeTruthy();
     });
   });
+
+  it("states the live phase once while the timeline is expanded", () => {
+    const view = render(
+      <MessageBubble
+        message={{
+          id: "assistant",
+          role: "assistant",
+          content: "",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+          activity: "Searching the codebase…",
+          activityLog: ["Starting Cursor cloud agent…", "Searching the codebase…"]
+        }}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+
+    expect(view.getAllByText("Searching the codebase…")).toHaveLength(1);
+    expect(view.getByText("2 steps")).toBeTruthy();
+  });
+
+  it("renders streamed reasoning as rich text instead of raw markdown", () => {
+    const view = render(
+      <MessageBubble
+        message={{
+          id: "assistant",
+          role: "assistant",
+          content: "",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+          thinking: "## Plan\n\n- Check `MessageBubble`\n- **Fix** the trace",
+          activityLog: ["Starting Cursor cloud agent…"]
+        }}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+
+    expect(view.getByRole("heading", { name: "Plan" })).toBeTruthy();
+    expect(view.container.querySelector("li code")?.textContent).toBe(
+      "MessageBubble"
+    );
+    expect(view.getByText("Fix").tagName).toBe("STRONG");
+    expect(view.queryByText(/## Plan/)).toBeNull();
+  });
 });

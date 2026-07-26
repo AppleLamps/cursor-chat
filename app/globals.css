@@ -241,6 +241,63 @@ button {
   color: #ffffff;
 }
 
+/* Compact markdown, used for streamed agent reasoning inside the trace panel. */
+.message-content-compact p {
+  margin: 0 0 0.5rem;
+}
+
+.message-content-compact h1,
+.message-content-compact h2,
+.message-content-compact h3,
+.message-content-compact h4 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.message-content-compact ul,
+.message-content-compact ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+}
+
+.message-content-compact li {
+  margin: 0.15rem 0;
+}
+
+.message-content-compact blockquote {
+  margin: 0 0 0.5rem;
+  padding-left: 0.6rem;
+}
+
+.message-content-compact code {
+  font-size: 0.75rem;
+}
+
+.message-content-compact .code-block {
+  margin: 0.5rem 0;
+  border-radius: 0.5rem;
+}
+
+.message-content-compact .code-block pre {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.message-content-compact table {
+  font-size: 0.75rem;
+}
+
+@keyframes trace-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-display);

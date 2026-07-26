@@ -93,16 +93,20 @@ function MarkdownCodeBlock({
 
 export default function MarkdownMessage({
   content,
-  isUser
+  isUser,
+  size = "default"
 }: {
   content: string;
   isUser: boolean;
+  size?: "default" | "sm";
 }) {
   return (
     <div
-      className={`message-content w-full min-w-0 text-[15px] leading-7 ${
-        isUser ? "message-content-user" : "message-content-assistant"
-      }`}
+      className={`message-content w-full min-w-0 ${
+        size === "sm"
+          ? "message-content-compact text-[13px] leading-[1.6]"
+          : "text-[15px] leading-7"
+      } ${isUser ? "message-content-user" : "message-content-assistant"}`}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
