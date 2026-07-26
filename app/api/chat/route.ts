@@ -457,10 +457,27 @@ async function recoverRun({
   };
 }
 
+// Losing the live event stream says nothing about the durable run: the cloud
+// agent keeps working and its result stays fetchable. Cold agents are the
+// common case — the first run of a freshly created agent regularly drops its
+// SSE attachment while the repository is still being provisioned.
+function isUnavailableRunStreamMessage(message: string | undefined) {
+  return typeof message === "string" && /stream is no longer available/i.test(message);
+}
+
 function isUnavailableRunStreamError(error: unknown) {
+  return error instanceof Error && isUnavailableRunStreamMessage(error.message);
+}
+
+// The SDK reports a dropped stream through `Run.wait()` rather than through
+// `Run.stream()`: the background stream loop closes the event buffer in a
+// `finally`, so iteration ends cleanly, and the rejection only resurfaces when
+// `wait()` awaits the same promise and marks the run as errored. Both shapes
+// have to be treated as a transport failure, not as a failed run.
+function isUnavailableRunStreamResult(result: RunResult) {
   return (
-    error instanceof Error &&
-    /run stream is no longer available/i.test(error.message)
+    result.status === "error" &&
+    isUnavailableRunStreamMessage(result.error?.message)
   );
 }
 
@@ -766,26 +783,40 @@ export async function POST(request: Request) {
 
         let completedRun = started.run;
         let streamTelemetry: RunTelemetry = {};
-        try {
-          streamTelemetry = await streamRunEvents(started.run, send);
-        } catch (error) {
-          if (!isUnavailableRunStreamError(error)) throw error;
 
+        const recoverFromLostStream = async () => {
           send("status", {
             message: "Live updates ended; waiting for the final run result..."
           });
           const recoveredRun = await pollRunUntilTerminal({
             apiKey,
             agentId: resolvedAgentId,
-            runId: started.run.id,
+            runId: completedRun.id,
             shouldStop: () => streamClosed
           });
-          if (!recoveredRun) return;
+          if (!recoveredRun) return null;
           completedRun = recoveredRun;
           currentRun = recoveredRun;
+          return recoveredRun.wait();
+        };
+
+        try {
+          streamTelemetry = await streamRunEvents(started.run, send);
+        } catch (error) {
+          if (!isUnavailableRunStreamError(error)) throw error;
+
+          const recoveredResult = await recoverFromLostStream();
+          if (!recoveredResult) return;
         }
 
-        const result = await completedRun.wait();
+        let result = await completedRun.wait();
+
+        if (isUnavailableRunStreamResult(result)) {
+          const recoveredResult = await recoverFromLostStream();
+          if (!recoveredResult) return;
+          result = recoveredResult;
+        }
+
         const requestId =
           result.requestId ?? streamTelemetry.requestId ?? completedRun.requestId;
         const usage =
