@@ -48,9 +48,83 @@ function normalizeParams(value: unknown): ModelParameterValue[] | undefined {
   return params.length > 0 ? params : undefined;
 }
 
+function parameterValueLabel(
+  param: ModelParameterValue,
+  parameters: ModelParameterDefinition[],
+  includeParameterName: boolean
+) {
+  const definition = parameters.find((candidate) => candidate.id === param.id);
+  const value = definition?.values.find(
+    (candidate) => candidate.value === param.value
+  );
+  const valueLabel = value?.displayName?.trim() || param.value;
+  if (!includeParameterName) return valueLabel;
+  return `${definition?.displayName?.trim() || param.id}: ${valueLabel}`;
+}
+
+function normalizeVariants(
+  item: ModelListItem,
+  modelDisplayName: string,
+  parameters: ModelParameterDefinition[]
+): ModelVariant[] {
+  if (!Array.isArray(item.variants)) return [];
+
+  const selectionIndexes = new Map<string, number>();
+  const normalized: ModelVariant[] = [];
+  for (const variant of item.variants) {
+    const params = normalizeParams(variant.params);
+    if (!params?.length) continue;
+
+    const selectionKey = modelSelectionKey({ id: item.id, params });
+    const existingIndex = selectionIndexes.get(selectionKey);
+    if (existingIndex !== undefined) {
+      if (variant.isDefault) normalized[existingIndex].isDefault = true;
+      continue;
+    }
+    selectionIndexes.set(selectionKey, normalized.length);
+
+    normalized.push({
+      params,
+      displayName: variant.displayName?.trim() || "",
+      ...(variant.description?.trim()
+        ? { description: variant.description.trim() }
+        : {}),
+      ...(variant.isDefault ? { isDefault: true } : {})
+    });
+  }
+  const labelCounts = new Map<string, number>();
+  for (const variant of normalized) {
+    const key = variant.displayName.toLocaleLowerCase();
+    labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
+  }
+
+  return normalized.map((variant) => {
+    const rawLabel = variant.displayName;
+    const labelIsModelName =
+      rawLabel.localeCompare(modelDisplayName, undefined, {
+        sensitivity: "accent"
+      }) === 0;
+    const labelIsRepeated =
+      (labelCounts.get(rawLabel.toLocaleLowerCase()) ?? 0) > 1;
+    const derivedLabel = variant.params
+      .map((param) =>
+        parameterValueLabel(param, parameters, variant.params.length > 1)
+      )
+      .join(" · ");
+    const displayName =
+      !rawLabel || labelIsModelName || labelIsRepeated ? derivedLabel : rawLabel;
+
+    return {
+      ...variant,
+      displayName: `${displayName}${variant.isDefault ? " (default)" : ""}`
+    };
+  });
+}
+
 function normalizeCatalogModel(item: ModelListItem): CatalogModel | null {
   const id = item.id?.trim();
   if (!id) return null;
+  const displayName = item.displayName?.trim() || id;
 
   const parameters = Array.isArray(item.parameters)
     ? item.parameters
@@ -76,19 +150,12 @@ function normalizeCatalogModel(item: ModelListItem): CatalogModel | null {
         }))
         .filter((parameter) => parameter.values.length > 0)
     : [];
-  const variants = Array.isArray(item.variants)
-    ? item.variants
-        .map((variant) => ({
-          ...variant,
-          params: normalizeParams(variant.params) ?? []
-        }))
-        .filter((variant) => variant.params.length > 0)
-    : [];
+  const variants = normalizeVariants(item, displayName, parameters);
   const defaultParams = variants.find((variant) => variant.isDefault)?.params;
 
   return {
     id,
-    displayName: item.displayName?.trim() || id,
+    displayName,
     ...(item.description?.trim()
       ? { description: item.description.trim() }
       : {}),

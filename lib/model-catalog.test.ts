@@ -102,6 +102,54 @@ describe("Cursor model catalog", () => {
     ).toMatchObject({ ok: false });
   });
 
+  it("derives distinct variant labels and removes duplicate selections", async () => {
+    listModels.mockResolvedValue([
+      {
+        id: "gpt-5.6-sol",
+        displayName: "GPT-5.6 Sol",
+        parameters: [
+          {
+            id: "reasoning",
+            displayName: "Reasoning",
+            values: [
+              { value: "low", displayName: "Low" },
+              { value: "high", displayName: "High" }
+            ]
+          }
+        ],
+        variants: [
+          {
+            displayName: "GPT-5.6 Sol",
+            params: [{ id: "reasoning", value: "low" }]
+          },
+          {
+            displayName: "GPT-5.6 Sol",
+            params: [{ id: "reasoning", value: "high" }]
+          },
+          {
+            displayName: "GPT-5.6 Sol",
+            isDefault: true,
+            params: [{ id: "reasoning", value: "high" }]
+          }
+        ]
+      }
+    ]);
+
+    const catalog = await getModelCatalog("key");
+
+    expect(catalog.models[0]?.variants).toEqual([
+      {
+        displayName: "Low",
+        params: [{ id: "reasoning", value: "low" }]
+      },
+      {
+        displayName: "High (default)",
+        isDefault: true,
+        params: [{ id: "reasoning", value: "high" }]
+      }
+    ]);
+  });
+
   it("rejects malformed selections rather than silently changing them", () => {
     expect(normalizeModelSelection({ id: "", params: [] })).toBeNull();
     expect(normalizeModelSelection({ id: "router", params: "cost" })).toBeNull();
