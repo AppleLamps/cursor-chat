@@ -29,7 +29,7 @@ describe("MessageBubble agent progress", () => {
       />
     );
 
-    expect(view.getByText("Agent is working")).toBeTruthy();
+    expect(view.getByText("Working · 3 steps")).toBeTruthy();
     expect(view.getAllByText("Writing the response…").length).toBeGreaterThan(0);
     expect(view.queryByText("Generating response...")).toBeNull();
     await waitFor(() => {
@@ -58,7 +58,39 @@ describe("MessageBubble agent progress", () => {
     );
 
     expect(view.getAllByText("Searching the codebase…")).toHaveLength(1);
-    expect(view.getByText("2 steps")).toBeTruthy();
+    expect(view.getByText("Working · 2 steps")).toBeTruthy();
+  });
+
+  it("renders reasoning inline where it happened, without its own scrollbox", () => {
+    const view = render(
+      <MessageBubble
+        message={{
+          id: "assistant",
+          role: "assistant",
+          content: "",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+          trace: [
+            { type: "activity", label: "Searching the codebase…" },
+            { type: "thinking", text: "The router owns the retry." },
+            { type: "activity", label: "Finished reading files" },
+            { type: "thinking", text: "Now I can answer." }
+          ]
+        }}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+
+    const trace = Array.from(view.container.querySelectorAll("li")).map(
+      (item) => item.textContent?.trim()
+    );
+    expect(trace[0]).toContain("Searching the codebase…");
+    expect(trace[1]).toBe("The router owns the retry.");
+    expect(trace[2]).toContain("Finished reading files");
+    expect(trace[3]).toBe("Now I can answer.");
+    expect(view.container.querySelector(".overflow-y-auto")).toBeNull();
   });
 
   it("renders streamed reasoning as rich text instead of raw markdown", () => {

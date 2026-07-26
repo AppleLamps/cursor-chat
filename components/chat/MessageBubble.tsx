@@ -63,7 +63,9 @@ export default function MessageBubble({
   const isStreaming = message.streaming === true;
   const hasTrace =
     !isUser &&
-    (Boolean(message.thinking?.trim()) || Boolean(message.activityLog?.length));
+    (Boolean(message.thinking?.trim()) ||
+      Boolean(message.activityLog?.length) ||
+      Boolean(message.trace?.length));
   const showStreamingPlaceholder =
     isStreaming && !message.content.trim() && !message.thinking?.trim();
   const showActivity =
@@ -119,8 +121,10 @@ export default function MessageBubble({
               <AgentTrace
                 content={message.thinking || ""}
                 activityLog={message.activityLog}
+                trace={message.trace}
                 sourceCount={message.sources?.length}
                 startedAt={message.createdAt}
+                durationMs={message.durationMs}
                 streaming={isStreaming}
               />
             ) : null}

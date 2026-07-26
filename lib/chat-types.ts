@@ -1,3 +1,4 @@
+import type { AgentTraceEntry } from "@/lib/agent-activity";
 import type { AgentMode, ModelId } from "@/lib/defaults";
 import type { ModelSelection } from "@/lib/model-client";
 
@@ -39,6 +40,8 @@ export type Message = {
   activity?: string;
   activityLog?: string[];
   thinking?: string;
+  /** Reasoning and tool updates in the order they streamed in. */
+  trace?: AgentTraceEntry[];
   sources?: string[];
   prUrl?: string;
   runId?: string;

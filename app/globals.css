@@ -289,15 +289,6 @@ button {
   font-size: 0.75rem;
 }
 
-@keyframes trace-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(300%);
-  }
-}
-
 @layer base {
   .theme {
     --font-heading: var(--font-display);
