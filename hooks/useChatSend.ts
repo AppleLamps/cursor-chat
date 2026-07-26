@@ -240,6 +240,8 @@ export function useChatSend({
       let assistantDurationMs: number | undefined;
       let assistantUsage: ChatTokenUsage | undefined;
       let assistantModelId: string | undefined;
+      let reasoningStarted = false;
+      let replyStarted = false;
       let resolvedAgentId = conversationAgentId;
       let resolvedAgentSessionToken = conversationAgentSessionToken;
       const streamingAssistant: Message = {
@@ -345,10 +347,20 @@ export function useChatSend({
             });
           },
           onText: (delta) => {
+            if (!replyStarted) {
+              replyStarted = true;
+              assistantActivity = "Writing the response…";
+              streamBuffer.setActivity(assistantActivity);
+            }
             assistantContent += delta;
             streamBuffer.appendText(delta);
           },
           onThinking: (payload) => {
+            if (!reasoningStarted && !replyStarted) {
+              reasoningStarted = true;
+              assistantActivity = "Reasoning about the findings…";
+              streamBuffer.setActivity(assistantActivity);
+            }
             assistantThinking = mergeThinkingText(assistantThinking, payload);
             streamBuffer.setThinking(assistantThinking);
           },

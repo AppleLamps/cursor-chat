@@ -401,6 +401,64 @@ describe("chat route validation and rate limiting", () => {
     expect(body).toContain("event: done");
   });
 
+  it("polls the durable run when its live stream is no longer available", async () => {
+    const unavailableRun = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      requestId: "request",
+      status: "running",
+      stream: async function* () {
+        throw new Error("Run stream is no longer available");
+      },
+      wait: vi.fn(),
+      supports: vi.fn().mockReturnValue(false)
+    };
+    const agent = {
+      agentId: "agent",
+      send: vi.fn().mockResolvedValue(unavailableRun),
+      [Symbol.asyncDispose]: vi.fn()
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>;
+    const recoveredRun = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      requestId: "request",
+      durationMs: 2,
+      status: "finished",
+      wait: vi.fn().mockResolvedValue({
+        id: "run",
+        status: "finished",
+        result: "recovered without the live stream",
+        model: { id: "composer-2.5" }
+      }),
+      supports: vi.fn().mockReturnValue(false)
+    } as unknown as Awaited<ReturnType<typeof Agent.getRun>>;
+    mockedAgentCreate.mockResolvedValue(agent);
+    mockedAgentGetRun.mockResolvedValue(recoveredRun);
+
+    const response = await POST(
+      chatRequest({
+        apiKey: "key",
+        prompt: "hello",
+        repoUrl: "https://github.com/acme/app",
+        branch: "main"
+      })
+    );
+    const body = await response.text();
+
+    expect(mockedAgentGetRun).toHaveBeenCalledWith("run", {
+      runtime: "cloud",
+      agentId: "agent",
+      apiKey: "key"
+    });
+    expect(agent.send).toHaveBeenCalledTimes(1);
+    expect(unavailableRun.wait).not.toHaveBeenCalled();
+    expect(body).toContain("recovered without the live stream");
+    expect(body).toContain("event: done");
+    expect(body).not.toContain("event: error");
+  });
+
   it("rejects a recovered run that is not owned by the verified agent", async () => {
     const run = {
       id: "run-to-recover",

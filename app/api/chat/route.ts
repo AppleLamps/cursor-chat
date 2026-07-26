@@ -71,6 +71,7 @@ const MAX_PROMPT_CHARS = 32_000;
 const MAX_CHAT_RUN_TIMEOUT_MS = maxDuration * 1_000 - 15_000;
 const DEFAULT_CHAT_RUN_TIMEOUT_MS = MAX_CHAT_RUN_TIMEOUT_MS;
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000;
+const RUN_STATUS_POLL_INTERVAL_MS = 2_000;
 
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream; charset=utf-8",
@@ -456,6 +457,43 @@ async function recoverRun({
   };
 }
 
+function isUnavailableRunStreamError(error: unknown) {
+  return (
+    error instanceof Error &&
+    /run stream is no longer available/i.test(error.message)
+  );
+}
+
+async function pollRunUntilTerminal({
+  apiKey,
+  agentId,
+  runId,
+  shouldStop
+}: {
+  apiKey: string;
+  agentId: string;
+  runId: string;
+  shouldStop: () => boolean;
+}): Promise<Run | null> {
+  while (!shouldStop()) {
+    const run = await Agent.getRun(runId, {
+      runtime: "cloud",
+      agentId,
+      apiKey
+    });
+    if (run.agentId !== agentId) {
+      throw new Error("The recovered run does not belong to this agent session.");
+    }
+    if (run.status !== "running") return run;
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, RUN_STATUS_POLL_INTERVAL_MS)
+    );
+  }
+
+  return null;
+}
+
 export async function POST(request: Request) {
   const parsedBody = await readJsonBody<ChatRequest>(request, MAX_CHAT_BODY_BYTES);
   if (!parsedBody.ok) return parsedBody.response;
@@ -726,11 +764,30 @@ export async function POST(request: Request) {
           return;
         }
 
-        const streamTelemetry = await streamRunEvents(started.run, send);
+        let completedRun = started.run;
+        let streamTelemetry: RunTelemetry = {};
+        try {
+          streamTelemetry = await streamRunEvents(started.run, send);
+        } catch (error) {
+          if (!isUnavailableRunStreamError(error)) throw error;
 
-        const result = await started.run.wait();
+          send("status", {
+            message: "Live updates ended; waiting for the final run result..."
+          });
+          const recoveredRun = await pollRunUntilTerminal({
+            apiKey,
+            agentId: resolvedAgentId,
+            runId: started.run.id,
+            shouldStop: () => streamClosed
+          });
+          if (!recoveredRun) return;
+          completedRun = recoveredRun;
+          currentRun = recoveredRun;
+        }
+
+        const result = await completedRun.wait();
         const requestId =
-          result.requestId ?? streamTelemetry.requestId ?? started.run.requestId;
+          result.requestId ?? streamTelemetry.requestId ?? completedRun.requestId;
         const usage =
           normalizeTokenUsage(result.usage) ?? streamTelemetry.usage;
 
@@ -740,7 +797,7 @@ export async function POST(request: Request) {
           logCursorFailure({
             error: runError,
             agentId: resolvedAgentId,
-            run: started.run,
+            run: completedRun,
             runId: result.id,
             requestId,
             agentMode,
@@ -761,7 +818,7 @@ export async function POST(request: Request) {
           logCursorFailure({
             error: "The Cursor agent run was cancelled.",
             agentId: resolvedAgentId,
-            run: started.run,
+            run: completedRun,
             runId: result.id,
             requestId,
             agentMode,
@@ -784,9 +841,9 @@ export async function POST(request: Request) {
 
         let thinking: string | undefined;
 
-        if (started.run.supports("conversation")) {
+        if (completedRun.supports("conversation")) {
           try {
-            const turns = await started.run.conversation();
+            const turns = await completedRun.conversation();
             thinking = extractThinkingFromConversation(turns);
           } catch {
             // Fall back to whatever thinking streamed during the run.
@@ -803,8 +860,8 @@ export async function POST(request: Request) {
           prUrl: extractPrUrl(result),
           requestId,
           usage,
-          durationMs: result.durationMs ?? started.run.durationMs,
-          model: modelIdFromResult(result, started.run)
+          durationMs: result.durationMs ?? completedRun.durationMs,
+          model: modelIdFromResult(result, completedRun)
         });
       } catch (error) {
         if (error instanceof CursorSdkError) {

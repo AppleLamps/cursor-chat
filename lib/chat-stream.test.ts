@@ -148,7 +148,7 @@ describe("consumeChatStream", () => {
 
     expect(activities).toEqual([
       "Working on a delegated task…",
-      "Tool grep failed (details truncated)"
+      "Code search failed (details truncated)"
     ]);
     expect(activities.join(" ")).not.toContain("secret");
   });
