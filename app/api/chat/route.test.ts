@@ -459,6 +459,107 @@ describe("chat route validation and rate limiting", () => {
     expect(body).not.toContain("event: error");
   });
 
+  it("polls the durable run when a lost stream is only reported by wait()", async () => {
+    // The SDK closes the run event buffer in a `finally`, so a dropped SSE
+    // attachment ends `stream()` cleanly and only resurfaces as an errored
+    // `wait()` result. This is what a cold agent's very first run hits.
+    const lostStreamRun = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      requestId: "request",
+      status: "running",
+      stream: async function* () {},
+      wait: vi.fn().mockResolvedValue({
+        id: "run",
+        status: "error",
+        error: { message: "Run stream is no longer available" },
+        model: { id: "composer-2.5" }
+      }),
+      supports: vi.fn().mockReturnValue(false)
+    };
+    const agent = {
+      agentId: "agent",
+      send: vi.fn().mockResolvedValue(lostStreamRun),
+      [Symbol.asyncDispose]: vi.fn()
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>;
+    const recoveredRun = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      requestId: "request",
+      durationMs: 2,
+      status: "finished",
+      wait: vi.fn().mockResolvedValue({
+        id: "run",
+        status: "finished",
+        result: "recovered after the stream dropped",
+        model: { id: "composer-2.5" }
+      }),
+      supports: vi.fn().mockReturnValue(false)
+    } as unknown as Awaited<ReturnType<typeof Agent.getRun>>;
+    mockedAgentCreate.mockResolvedValue(agent);
+    mockedAgentGetRun.mockResolvedValue(recoveredRun);
+
+    const response = await POST(
+      chatRequest({
+        apiKey: "key",
+        prompt: "hello",
+        repoUrl: "https://github.com/acme/app",
+        branch: "main"
+      })
+    );
+    const body = await response.text();
+
+    expect(mockedAgentGetRun).toHaveBeenCalledWith("run", {
+      runtime: "cloud",
+      agentId: "agent",
+      apiKey: "key"
+    });
+    expect(agent.send).toHaveBeenCalledTimes(1);
+    expect(body).toContain("recovered after the stream dropped");
+    expect(body).toContain("event: done");
+    expect(body).not.toContain("event: error");
+    expect(body).not.toContain("no longer available");
+  });
+
+  it("still reports a genuine run failure", async () => {
+    const failedRun = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      requestId: "request",
+      status: "running",
+      stream: async function* () {},
+      wait: vi.fn().mockResolvedValue({
+        id: "run",
+        status: "error",
+        error: { message: "The sandbox ran out of disk space" },
+        model: { id: "composer-2.5" }
+      }),
+      supports: vi.fn().mockReturnValue(false)
+    };
+    mockedAgentCreate.mockResolvedValue({
+      agentId: "agent",
+      send: vi.fn().mockResolvedValue(failedRun),
+      [Symbol.asyncDispose]: vi.fn()
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>);
+
+    const response = await POST(
+      chatRequest({
+        apiKey: "key",
+        prompt: "hello",
+        repoUrl: "https://github.com/acme/app",
+        branch: "main"
+      })
+    );
+    const body = await response.text();
+
+    expect(mockedAgentGetRun).not.toHaveBeenCalled();
+    expect(body).toContain("event: error");
+    expect(body).toContain("The sandbox ran out of disk space");
+  });
+
   it("rejects a recovered run that is not owned by the verified agent", async () => {
     const run = {
       id: "run-to-recover",
