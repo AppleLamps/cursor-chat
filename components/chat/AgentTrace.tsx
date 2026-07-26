@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BrainIcon,
-  CheckIcon,
   ChevronDownIcon,
   FileSearchIcon,
   GitBranchIcon,
@@ -19,13 +18,14 @@ import {
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
 import {
   activityExplanation,
-  buildActivitySteps,
+  buildTraceItems,
+  countTraceSteps,
   formatElapsedTime,
   type AgentActivityKind,
-  type AgentActivityStep
+  type AgentActivityStep,
+  type AgentTraceEntry,
+  type AgentTraceItem
 } from "@/lib/agent-activity";
-
-const VISIBLE_STEPS_WHILE_STREAMING = 5;
 
 const STEP_ICONS: Record<AgentActivityKind, typeof SearchIcon> = {
   start: SparklesIcon,
@@ -41,35 +41,47 @@ const STEP_ICONS: Record<AgentActivityKind, typeof SearchIcon> = {
   generic: WorkflowIcon
 };
 
+/**
+ * The run's reasoning and tool calls rendered directly in the conversation
+ * flow, in the order they happened. Nothing here scrolls on its own: the trace
+ * grows down the page like any other message so the newest work stays in view.
+ */
 export default function AgentTrace({
   content,
   activityLog = [],
+  trace,
   sourceCount = 0,
   startedAt,
+  durationMs,
   streaming
 }: {
   content: string;
   activityLog?: string[];
+  trace?: AgentTraceEntry[];
   sourceCount?: number;
   startedAt: string;
+  durationMs?: number;
   streaming?: boolean;
 }) {
   const [open, setOpen] = useState(Boolean(streaming));
-  const [showAllSteps, setShowAllSteps] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const userToggledRef = useRef(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const traceText = content.trim();
-  const steps = useMemo(() => buildActivitySteps(activityLog), [activityLog]);
-  const currentStep = streaming ? steps[steps.length - 1] : undefined;
-  const currentLabel = currentStep?.label || "Starting the Cursor cloud agent…";
-  const hiddenStepCount =
-    streaming && !showAllSteps
-      ? Math.max(0, steps.length - VISIBLE_STEPS_WHILE_STREAMING)
-      : 0;
-  const visibleSteps = hiddenStepCount ? steps.slice(hiddenStepCount) : steps;
+  const items = useMemo(
+    () => buildTraceItems(trace, { activityLog, thinking: content }),
+    [trace, activityLog, content]
+  );
+  const lastStep = useMemo(() => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.type === "step") return item.step;
+    }
+    return undefined;
+  }, [items]);
+  const activeStep = streaming ? lastStep : undefined;
+  const stepCount = countTraceSteps(items);
 
   useEffect(() => {
+    // Collapse once the run ends unless the reader has taken over the toggle.
     if (!userToggledRef.current) {
       setOpen(Boolean(streaming));
     }
@@ -94,118 +106,105 @@ export default function AgentTrace({
     return () => window.clearInterval(interval);
   }, [startedAt, streaming]);
 
-  useEffect(() => {
-    if (!streaming || !open || !scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [content, currentLabel, streaming, open]);
-
-  const stepCountLabel = `${steps.length} ${steps.length === 1 ? "step" : "steps"}`;
-  // The header and the timeline would otherwise both spell out the live step,
-  // so the header falls back to a summary whenever the timeline is visible.
-  const headerDetail = streaming
+  const stepCountLabel = `${stepCount} ${stepCount === 1 ? "step" : "steps"}`;
+  const sourceLabel = sourceCount
+    ? ` · ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}`
+    : "";
+  // Expanded, the timeline already spells out the live step, so the header
+  // summarizes instead of repeating it.
+  const summary = streaming
     ? open
-      ? traceText
-        ? `${stepCountLabel} · reasoning streaming`
-        : stepCountLabel
-      : currentLabel
-    : `${stepCountLabel}${sourceCount > 0 ? ` · ${sourceCount} ${sourceCount === 1 ? "source" : "sources"}` : ""}`;
+      ? `Working · ${stepCountLabel}`
+      : lastStep?.label || "Starting the Cursor cloud agent…"
+    : `${
+        durationMs && durationMs > 0
+          ? `Worked for ${formatElapsedTime(Math.round(durationMs / 1_000))} · `
+          : ""
+      }${stepCountLabel}${sourceLabel}`;
 
   return (
-    <div className="mb-4 w-full overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-      {streaming ? (
-        <div className="h-0.5 overflow-hidden bg-muted" aria-hidden="true">
-          <div className="h-full w-1/3 animate-[trace-sweep_1.6s_ease-in-out_infinite] rounded-full bg-foreground/70" />
-        </div>
-      ) : null}
+    <div className="mb-4 w-full">
       <button
         type="button"
         onClick={() => {
           userToggledRef.current = true;
           setOpen((current) => !current);
         }}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring/50"
+        className="-ml-1 flex max-w-full items-center gap-2 rounded-md px-1 py-1 text-left text-xs text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
         aria-expanded={open ? "true" : "false"}
       >
-        <span className="flex min-w-0 items-center gap-2.5">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            {streaming ? (
-              <LoaderIcon className="size-3.5 animate-spin" />
-            ) : (
-              <CheckIcon className="size-3.5" />
-            )}
-          </span>
-          <span className="min-w-0">
-            <span className="block font-semibold text-foreground">
-              {streaming ? "Agent is working" : "Agent work completed"}
-            </span>
-            <span
-              className={`mt-0.5 block truncate text-xs font-normal text-muted-foreground ${
-                streaming && !open ? "shimmer" : ""
-              }`}
-              aria-live="polite"
-            >
-              {headerDetail}
-            </span>
-          </span>
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          {streaming ? (
-            <span className="rounded-full bg-muted px-2 py-1 text-[11px] tabular-nums text-muted-foreground">
-              {formatElapsedTime(elapsedSeconds)}
-            </span>
-          ) : null}
-          <ChevronDownIcon
-            aria-hidden="true"
-            className={`size-4 text-muted-foreground transition ${open ? "rotate-180" : ""}`}
-          />
-        </span>
-      </button>
-      {open ? (
-        <div
-          ref={scrollRef}
-          className="max-h-96 overflow-y-auto border-t border-border bg-muted/20 px-3 py-3"
+        {streaming ? (
+          <LoaderIcon aria-hidden="true" className="size-3.5 shrink-0 animate-spin" />
+        ) : (
+          <BrainIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        )}
+        <span
+          className={`truncate font-medium ${streaming ? "shimmer" : ""}`}
+          aria-live="polite"
         >
-          {hiddenStepCount ? (
-            <button
-              type="button"
-              onClick={() => setShowAllSteps(true)}
-              className="mb-2 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
-            >
-              Show {hiddenStepCount} earlier {hiddenStepCount === 1 ? "step" : "steps"}
-            </button>
-          ) : null}
-          {visibleSteps.length ? (
-            <ol className="relative space-y-0">
-              {visibleSteps.map((step, index) => (
-                <TimelineStep
-                  key={step.id}
-                  step={step}
-                  isLast={index === visibleSteps.length - 1}
-                  isActive={streaming === true && step === currentStep}
-                  elapsedSeconds={elapsedSeconds}
-                />
-              ))}
-            </ol>
-          ) : null}
-          {traceText ? (
-            <div className="mt-3 rounded-lg border border-border bg-background px-3 py-2.5">
-              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                <BrainIcon aria-hidden="true" className="size-3.5" />
-                Reasoning
-                {streaming ? (
-                  <span className="font-normal normal-case tracking-normal text-muted-foreground/80">
-                    live
-                  </span>
-                ) : null}
-              </p>
-              <div className="text-muted-foreground">
-                <MarkdownMessage content={traceText} isUser={false} size="sm" />
-              </div>
-            </div>
-          ) : null}
-        </div>
+          {summary}
+        </span>
+        {streaming ? (
+          <span className="shrink-0 tabular-nums text-muted-foreground/80">
+            {formatElapsedTime(elapsedSeconds)}
+          </span>
+        ) : null}
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={`size-3.5 shrink-0 transition ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && items.length ? (
+        <ol className="mt-1.5 space-y-0 border-l border-border pl-0">
+          {items.map((item, index) => (
+            <TraceItem
+              key={item.id}
+              item={item}
+              isLast={index === items.length - 1}
+              isActive={
+                streaming === true &&
+                item.type === "step" &&
+                item.step === activeStep
+              }
+              elapsedSeconds={elapsedSeconds}
+            />
+          ))}
+        </ol>
       ) : null}
     </div>
+  );
+}
+
+function TraceItem({
+  item,
+  isLast,
+  isActive,
+  elapsedSeconds
+}: {
+  item: AgentTraceItem;
+  isLast: boolean;
+  isActive: boolean;
+  elapsedSeconds: number;
+}) {
+  if (item.type === "reasoning") {
+    return (
+      // Indented to line up with step labels rather than their icons.
+      <li className={`relative pl-10 ${isLast ? "" : "pb-3"}`}>
+        <div className="text-xs leading-5 text-muted-foreground">
+          <MarkdownMessage content={item.text} isUser={false} size="sm" />
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <TimelineStep
+      step={item.step}
+      isLast={isLast}
+      isActive={isActive}
+      elapsedSeconds={elapsedSeconds}
+    />
   );
 }
 
@@ -223,20 +222,14 @@ function TimelineStep({
   const Icon = step.state === "failed" ? AlertCircleIcon : STEP_ICONS[step.kind];
 
   return (
-    <li className="relative flex gap-2.5 pb-3 last:pb-0">
-      {!isLast ? (
-        <span
-          aria-hidden="true"
-          className="absolute left-[11px] top-6 bottom-0 w-px bg-border"
-        />
-      ) : null}
+    <li className={`relative flex gap-2 pl-4 ${isLast ? "" : "pb-3"}`}>
       <span
-        className={`relative z-10 flex size-[22px] shrink-0 items-center justify-center rounded-full border ${
+        className={`mt-0.5 flex size-4 shrink-0 items-center justify-center ${
           step.state === "failed"
-            ? "border-destructive/40 bg-destructive/10 text-destructive"
+            ? "text-destructive"
             : isActive
-              ? "border-foreground/30 bg-background text-foreground"
-              : "border-border bg-background text-muted-foreground"
+              ? "text-foreground"
+              : "text-muted-foreground"
         }`}
       >
         {isActive ? (
@@ -245,11 +238,11 @@ function TimelineStep({
           <Icon className="size-3" />
         )}
       </span>
-      <div className="min-w-0 pt-0.5">
+      <div className="min-w-0">
         <p
           className={`flex flex-wrap items-center gap-1.5 text-xs leading-5 ${
             isActive
-              ? "font-semibold text-foreground"
+              ? "font-medium text-foreground"
               : step.state === "failed"
                 ? "text-destructive"
                 : "text-muted-foreground"
@@ -263,7 +256,7 @@ function TimelineStep({
           ) : null}
         </p>
         {isActive ? (
-          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground/80">
             {activityExplanation(step.label)}
           </p>
         ) : null}

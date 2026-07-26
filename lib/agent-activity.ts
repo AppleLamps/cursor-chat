@@ -114,6 +114,86 @@ export function buildActivitySteps(activityLog: string[] = []): AgentActivitySte
   return steps;
 }
 
+/**
+ * One ordered slice of the run as it happened: either a tool/status update or
+ * a block of reasoning that streamed between two of them.
+ */
+export type AgentTraceEntry =
+  | { type: "activity"; label: string }
+  | { type: "thinking"; text: string };
+
+export type AgentTraceItem =
+  | { type: "step"; id: string; step: AgentActivityStep }
+  | { type: "reasoning"; id: string; text: string };
+
+/**
+ * Flattens the recorded timeline into render-ready items so reasoning appears
+ * where it actually happened instead of being appended after every tool call.
+ * Older messages predate the timeline and fall back to steps-then-reasoning.
+ */
+export function buildTraceItems(
+  entries: AgentTraceEntry[] | undefined,
+  fallback: { activityLog?: string[]; thinking?: string } = {}
+): AgentTraceItem[] {
+  if (!entries?.length) {
+    const items: AgentTraceItem[] = buildActivitySteps(
+      fallback.activityLog
+    ).map((step) => ({ type: "step", id: step.id, step }));
+    const thinking = fallback.thinking?.trim();
+
+    if (thinking) {
+      items.push({ type: "reasoning", id: "reasoning-legacy", text: thinking });
+    }
+
+    return items;
+  }
+
+  const items: AgentTraceItem[] = [];
+
+  for (const entry of entries) {
+    if (entry.type === "thinking") {
+      const text = entry.text.trim();
+      if (!text) continue;
+      items.push({ type: "reasoning", id: `reasoning-${items.length}`, text });
+      continue;
+    }
+
+    const label = entry.label.trim();
+    if (!label) continue;
+
+    const kind = activityKind(label);
+    const state = activityState(label);
+    const previous = items[items.length - 1];
+
+    // Reasoning breaks a run of steps, so only merge with an adjacent step.
+    if (previous?.type === "step" && previous.step.kind === kind) {
+      if (previous.step.label === label) {
+        previous.step.repeatCount += 1;
+        continue;
+      }
+
+      if (previous.step.state === "running" && state !== "running") {
+        previous.step.label = label;
+        previous.step.state = state;
+        continue;
+      }
+    }
+
+    const id = `${items.length}-${label}`;
+    items.push({
+      type: "step",
+      id,
+      step: { id, label, kind, state, repeatCount: 1 }
+    });
+  }
+
+  return items;
+}
+
+export function countTraceSteps(items: AgentTraceItem[]) {
+  return items.reduce((total, item) => (item.type === "step" ? total + 1 : total), 0);
+}
+
 export function activityExplanation(label: string) {
   switch (activityKind(label)) {
     case "writing":

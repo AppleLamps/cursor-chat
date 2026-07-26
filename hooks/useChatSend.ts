@@ -267,7 +267,8 @@ export function useChatSend({
           activity: snapshot.activity || undefined,
           activityLog: snapshot.activityLog.length
             ? snapshot.activityLog
-            : undefined
+            : undefined,
+          trace: snapshot.trace.length ? snapshot.trace : undefined
         });
       });
       streamBuffer.setActivity(assistantActivity);
@@ -399,7 +400,9 @@ export function useChatSend({
         });
 
         streamBuffer.flushNow();
-        const finalActivityLog = streamBuffer.getSnapshot().activityLog;
+        const finalSnapshot = streamBuffer.getSnapshot();
+        const finalActivityLog = finalSnapshot.activityLog;
+        const finalTrace = finalSnapshot.trace;
 
         if (!assistantContent.trim()) {
           throw new Error("Cursor returned no assistant content.");
@@ -413,6 +416,7 @@ export function useChatSend({
           streaming: false,
           thinking: assistantThinking || undefined,
           activityLog: finalActivityLog.length ? finalActivityLog : undefined,
+          trace: finalTrace.length ? finalTrace : undefined,
           sources: assistantSources,
           prUrl: assistantPrUrl,
           runId: assistantRunId,
