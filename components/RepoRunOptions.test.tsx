@@ -23,7 +23,9 @@ describe("RepoRunOptions", () => {
     );
 
     fireEvent.click(view.getByRole("button", { name: /Plan/ }));
-    fireEvent.click(view.getByRole("button", { name: /Grok 4.5 High/ }));
+    fireEvent.change(view.getByLabelText("Model"), {
+      target: { value: "grok-4.5" }
+    });
 
     expect(onAgentModeChange).toHaveBeenCalledWith("plan");
     expect(onModelChange).toHaveBeenCalledWith({ id: "grok-4.5" });
@@ -42,7 +44,9 @@ describe("RepoRunOptions", () => {
     );
 
     expect(view.queryByRole("button", { name: /Implement/ })).toBeNull();
-    expect(view.getByRole("button", { name: /Composer 2.5/ })).toBeTruthy();
+    expect((view.getByLabelText("Model") as HTMLSelectElement).value).toBe(
+      "composer-2.5"
+    );
   });
 
   it("renders catalog parameters and returns the canonical SDK selection", () => {

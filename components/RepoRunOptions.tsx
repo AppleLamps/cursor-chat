@@ -27,6 +27,8 @@ export default function RepoRunOptions({
   onAgentModeChange: (mode: AgentMode) => void;
   onModelChange: (model: ModelSelection) => void;
 }) {
+  const selectedCatalogModel = models.find((entry) => entry.id === model.id);
+
   return (
     <>
       {allowModeSelection ? (
@@ -71,27 +73,45 @@ export default function RepoRunOptions({
             Showing fallback models while the Cursor catalog is unavailable.
           </p>
         ) : null}
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {models.map((catalogModel) => {
-            const selection = catalogModel.model;
-            return (
-              <Option
-                key={catalogModel.id}
-                selected={model.id === catalogModel.id}
-                title={catalogModel.displayName}
-                description={catalogModel.description}
-                onSelect={() => onModelChange(selection)}
-              />
-            );
-          })}
+        <div className="mt-2">
+          <label className="sr-only" htmlFor="model-selection">
+            Model
+          </label>
+          <select
+            id="model-selection"
+            value={selectedCatalogModel ? model.id : ""}
+            onChange={(event) => {
+              const selected = models.find(
+                (entry) => entry.id === event.target.value
+              );
+              if (selected) onModelChange(selected.model);
+            }}
+            className="w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2.5 text-sm text-[#202123] outline-none transition focus:border-[#a8a8a8] focus:ring-2 focus:ring-[#d9d9d9]"
+          >
+            {!selectedCatalogModel ? (
+              <option value="" disabled>
+                Select a model
+              </option>
+            ) : null}
+            {models.map((catalogModel) => (
+              <option key={catalogModel.id} value={catalogModel.id}>
+                {catalogModel.displayName}
+              </option>
+            ))}
+          </select>
+          {selectedCatalogModel?.description ? (
+            <p className="mt-1.5 text-xs leading-5 text-[#8a8a8a]">
+              {selectedCatalogModel.description}
+            </p>
+          ) : null}
         </div>
-        {!models.some((entry) => entry.id === model.id) ? (
+        {!selectedCatalogModel ? (
           <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
             Previously selected model “{model.id}” is unavailable. Choose another
             model before continuing.
           </p>
         ) : null}
-        {models.find((entry) => entry.id === model.id)?.variants?.length ? (
+        {selectedCatalogModel?.variants?.length ? (
           <div className="mt-3">
             <label className="text-xs font-medium text-[#555]" htmlFor="model-variant">
               Variant
@@ -99,28 +119,25 @@ export default function RepoRunOptions({
             <select
               id="model-variant"
               value={String(
-                models
-                  .find((entry) => entry.id === model.id)
-                  ?.variants.findIndex((variant) =>
-                    modelSelectionsEqual({ id: model.id, params: variant.params }, model)
-                  ) ?? -1
+                selectedCatalogModel.variants.findIndex((variant) =>
+                  modelSelectionsEqual({ id: model.id, params: variant.params }, model)
+                )
               )}
               onChange={(event) => {
-                const selected = models
-                  .find((entry) => entry.id === model.id)
-                  ?.variants[Number(event.target.value)];
+                const selected =
+                  selectedCatalogModel.variants[Number(event.target.value)];
                 if (selected) onModelChange({ id: model.id, params: selected.params });
               }}
               className="mt-1 w-full rounded-xl border border-[#d9d9d9] bg-white px-3 py-2 text-sm"
             >
               <option value="-1" disabled>Select a variant</option>
-              {models.find((entry) => entry.id === model.id)?.variants.map((variant, index) => (
+              {selectedCatalogModel.variants.map((variant, index) => (
                 <option key={`${variant.displayName}-${index}`} value={index}>{variant.displayName}</option>
               ))}
             </select>
           </div>
         ) : (
-          models.find((entry) => entry.id === model.id)?.parameters?.map((parameter) => (
+          selectedCatalogModel?.parameters?.map((parameter) => (
             <div key={parameter.id} className="mt-3">
               <label className="text-xs font-medium text-[#555]" htmlFor={`model-param-${parameter.id}`}>
                 {parameter.displayName ?? parameter.id}
