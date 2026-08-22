@@ -9,9 +9,10 @@ import {
   RefreshCwIcon
 } from "lucide-react";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
-import type { Message, PdfAttachment } from "@/lib/chat-types";
+import type { ChatUsageCost, Message, PdfAttachment } from "@/lib/chat-types";
 import { roleLabel, timeLabel } from "@/lib/chat-conversation";
 import { formatTokenUsage, telemetryTitle } from "@/lib/chat-telemetry";
+import { describeCost } from "@/lib/usage-api";
 import { githubBlobUrl } from "@/lib/sources";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
 import AgentTrace from "@/components/chat/AgentTrace";
@@ -42,6 +43,7 @@ export default function MessageBubble({
   copied,
   onCopy,
   onRetry,
+  cost,
   artifactScope
 }: {
   message: Message;
@@ -50,6 +52,7 @@ export default function MessageBubble({
   copied: boolean;
   onCopy: () => void;
   onRetry: () => void;
+  cost?: ChatUsageCost;
   artifactScope?: {
     apiKey: string;
     conversation: Conversation;
@@ -74,6 +77,7 @@ export default function MessageBubble({
     !message.activityLog?.length &&
     !["Thinking...", "Thinking…"].includes(message.activity);
   const tokenUsageLabel = formatTokenUsage(message.usage);
+  const costDisplay = describeCost(cost);
   const tokenUsageTitle = telemetryTitle({
     usage: message.usage,
     requestId: message.requestId,
@@ -190,6 +194,17 @@ export default function MessageBubble({
             <>
               <span aria-hidden="true">/</span>
               <span title={tokenUsageTitle || undefined}>{tokenUsageLabel}</span>
+            </>
+          ) : null}
+          {!isUser && !message.error && costDisplay ? (
+            <>
+              <span aria-hidden="true">/</span>
+              <span
+                title={costDisplay.detail}
+                className={costDisplay.included ? "italic" : undefined}
+              >
+                {costDisplay.label}
+              </span>
             </>
           ) : null}
           {!isUser && !message.error && !isStreaming ? (

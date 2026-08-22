@@ -24,6 +24,8 @@ pull request creation.
   runs.
 - **Rich chat experience:** Markdown, syntax-highlighted code, image
   attachments, source links, usage telemetry, and persistent local history.
+- **Visible spend:** Each response shows what Cursor actually billed for it, with
+  a running total for the chat, so Implement runs are not a blind cost.
 
 ## Quick start
 
@@ -61,7 +63,7 @@ forwarded to Cursor.
 | `npm run dev` | Start the local development server |
 | `npm run test` | Run the Vitest test suite |
 | `npm run typecheck` | Validate TypeScript without emitting files |
-| `npm run build` | Create an optimized production build |
+| `npm run build` | Create an optimized production build (requires a signing secret — see [Production requirements](#production-requirements)) |
 | `npm run start` | Serve the production build |
 
 ## Chat modes
@@ -111,6 +113,7 @@ access.
 - Local conversation history with rename, delete, and cross-tab synchronization
 - Per-response duration, model, request ID, and token usage when reported by
   Cursor
+- Billed cost per response and per chat, read from `Agent.getUsage()`
 
 ## How it works
 
@@ -159,6 +162,22 @@ Generate a suitable signing secret with:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
+`npm run build` counts as production, so it fails closed too — even on a laptop
+with no intention of deploying. Without a secret it stops during page-data
+collection with:
+
+```text
+Error: ASKCURSOR_AGENT_SESSION_SECRET, AUTH_SECRET, or NEXTAUTH_SECRET must be set in production.
+Error: Failed to collect page data for /api/agents/lifecycle
+```
+
+Put the secret in `.env.local` (`npm run dev` needs nothing extra), or pass one
+for a single build:
+
+```bash
+ASKCURSOR_AGENT_SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") npm run build
+```
+
 ### Optional controls
 
 | Variable | Purpose |
@@ -182,21 +201,25 @@ app/
     branches/route.ts        GitHub branch discovery
     chat/route.ts            Cursor agent lifecycle and SSE streaming
     repos/route.ts           Cursor repository discovery
+    usage/route.ts           Billed token usage and cost per run
 components/
   chat/                      Chat interface and message presentation
   ChatApp.tsx                Application shell and chat orchestration
   Onboarding.tsx             Runtime credential onboarding
   RepoPicker.tsx             Repository, branch, mode, and model selection
 hooks/
+  useAgentUsage.ts           Per-chat billed cost, with billing-lag retries
   useAuthSettings.ts         Local credential preferences
   useChatSend.ts             Send, retry, and share orchestration
   useConversationStore.ts    Persistent conversation state
 lib/
   agent-policy.ts            Implement-mode authorization rules
+  agent-request-auth.ts      Shared agent-scoped request authorization
   agent-session.ts           Signed agent resume sessions
   cursor-prompt.ts           First-message and follow-up payloads
   rate-limit.ts              Rate limits, body guards, and stream slots
   sse.ts                     Streaming event definitions
+  usage-api.ts               Cost normalization and display formatting
   system-prompt.ts           Ask-mode policy
   plan-prompt.ts             Plan-mode policy
   implement-prompt.ts        Implement-mode policy

@@ -24,7 +24,8 @@ export const RATE_LIMITS = {
   chatImplement: { limit: 6, windowMs: 60_000 },
   repos: { limit: 30, windowMs: 60_000 },
   models: { limit: 30, windowMs: 60_000 },
-  branches: { limit: 60, windowMs: 60_000 }
+  branches: { limit: 60, windowMs: 60_000 },
+  usage: { limit: 60, windowMs: 60_000 }
 } as const;
 
 export const MAX_API_BODY_BYTES = 96_000;

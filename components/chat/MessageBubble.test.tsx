@@ -119,3 +119,66 @@ describe("MessageBubble agent progress", () => {
     expect(view.queryByText(/## Plan/)).toBeNull();
   });
 });
+
+describe("MessageBubble cost", () => {
+  const completed = {
+    id: "assistant",
+    role: "assistant" as const,
+    content: "Done.",
+    createdAt: new Date().toISOString(),
+    runId: "run-1",
+    usage: {
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 30
+    }
+  };
+
+  it("shows the charged amount alongside the token count", () => {
+    const view = render(
+      <MessageBubble
+        message={completed}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+        cost={{ rawCostCents: 200, chargedCents: 150 }}
+      />
+    );
+
+    expect(view.getByText("30 tokens")).toBeTruthy();
+    expect(view.getByTitle("Charged $1.50 of $2.00 list price.").textContent).toBe(
+      "$1.50"
+    );
+  });
+
+  it("marks plan-included usage instead of reporting it as free", () => {
+    const view = render(
+      <MessageBubble
+        message={completed}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+        cost={{ rawCostCents: 40, chargedCents: 0 }}
+      />
+    );
+
+    expect(view.getByText("included")).toBeTruthy();
+    expect(view.queryByText("$0.00")).toBeNull();
+  });
+
+  it("shows no cost while billing is still pending", () => {
+    const view = render(
+      <MessageBubble
+        message={completed}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+
+    expect(view.getByText("30 tokens")).toBeTruthy();
+    expect(view.queryByText("included")).toBeNull();
+  });
+});

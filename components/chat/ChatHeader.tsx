@@ -4,6 +4,8 @@ import { PanelLeftIcon } from "lucide-react";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
 import { APP_NAME, type AgentMode } from "@/lib/defaults";
 import ModeToggle, { agentModeLabel } from "@/components/chat/ModeToggle";
+import type { ChatUsageCost } from "@/lib/chat-types";
+import { describeCost } from "@/lib/usage-api";
 import { Button } from "@/components/ui/button";
 
 export default function ChatHeader({
@@ -17,6 +19,7 @@ export default function ChatHeader({
   canChangeAgentMode,
   onAgentModeChange,
   prUrl,
+  conversationCost,
   onChangeRepo,
   onToggleSidebar,
   onOpenMobileSidebar,
@@ -36,6 +39,7 @@ export default function ChatHeader({
   canChangeAgentMode: boolean;
   onAgentModeChange: (mode: AgentMode) => void;
   prUrl?: string;
+  conversationCost?: ChatUsageCost;
   onChangeRepo: () => void;
   onToggleSidebar: () => void;
   onOpenMobileSidebar: () => void;
@@ -45,6 +49,8 @@ export default function ChatHeader({
   onToggleCloudArchive: () => void;
   onDeleteCloudAgent: () => void;
 }) {
+  const chatCost = describeCost(conversationCost);
+
   return (
     <header className="flex h-14 items-center justify-between gap-3 border-b border-border bg-background px-3 sm:px-5">
       <div className="flex min-w-0 items-center gap-2">
@@ -125,6 +131,16 @@ export default function ChatHeader({
                 PR
               </a>
             </Button>
+          ) : null}
+          {chatCost ? (
+            <span
+              className={`shrink-0 rounded-md bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground ${
+                chatCost.included ? "italic" : ""
+              }`}
+              title={`This chat: ${chatCost.detail}`}
+            >
+              {chatCost.label}
+            </span>
           ) : null}
         </div>
         {canChangeAgentMode ? (
