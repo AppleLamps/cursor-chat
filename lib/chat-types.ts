@@ -27,6 +27,14 @@ export type ChatTokenUsage = {
   reasoningTokens?: number;
 };
 
+/** Billed cost in float cents, as reported by the Cursor billing backend. */
+export type ChatUsageCost = {
+  /** Undiscounted model token cost. 0 for request-priced usage. */
+  rawCostCents: number;
+  /** Amount actually charged. 0 for plan-included, BYOK, and credit usage. */
+  chargedCents: number;
+};
+
 export type Message = {
   id: string;
   role: Role;

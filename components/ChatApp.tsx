@@ -41,6 +41,7 @@ import { useConversationStore } from "@/hooks/useConversationStore";
 import { useRepoCatalog } from "@/hooks/useRepoCatalog";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useModelCatalog } from "@/hooks/useModelCatalog";
+import { useAgentUsage } from "@/hooks/useAgentUsage";
 
 const SIDEBAR_STORAGE_KEY = STORAGE_KEYS.SIDEBAR;
 
@@ -67,6 +68,7 @@ export default function ChatApp() {
     apiKey: auth.apiKey,
     onError: (message) => setChatErrorRef.current(message)
   });
+  const agentUsage = useAgentUsage(auth.apiKey, conversations.activeConversation);
 
   const appendInput = useCallback((text: string) => {
     setInput((current) => [current.trim(), text].filter(Boolean).join("\n\n"));
@@ -561,6 +563,8 @@ export default function ChatApp() {
             )
           }
           onDeleteCloudAgent={() => void manageCloudAgent("delete")}
+          conversationCost={agentUsage.total}
+          conversationCostPartial={agentUsage.partial}
         />
 
         {!hasMessages ? (
@@ -600,6 +604,11 @@ export default function ChatApp() {
                         copied={chat.copiedMessageId === message.id}
                         onCopy={() => void chat.copyMessage(message)}
                         onRetry={() => chat.retryAssistantMessage(message.id)}
+                        cost={
+                          message.runId
+                            ? agentUsage.costByRunId.get(message.runId)
+                            : undefined
+                        }
                         artifactScope={
                           conversations.activeConversation && auth.apiKey
                             ? {
