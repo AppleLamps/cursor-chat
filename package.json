@@ -13,7 +13,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.24",
+    "@cursor/sdk": "^1.0.28",
     "@shadcn/react": "^0.1.0",
     "@upstash/redis": "^1.38.0",
     "class-variance-authority": "^0.7.1",
