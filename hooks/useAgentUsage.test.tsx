@@ -127,6 +127,43 @@ describe("useAgentUsage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("drops the previous chat's total when the read fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          cost: { rawCostCents: 99, chargedCents: 99 },
+          runs: [
+            {
+              runId: "run-1",
+              usage: tokenUsage,
+              cost: { rawCostCents: 99, chargedCents: 99 }
+            }
+          ]
+        })
+      })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = conversation([assistant("run-1")]);
+    const second = { ...conversation([assistant("run-9")]), id: "other" };
+
+    const { result, rerender } = renderHook(
+      ({ chat }) => useAgentUsage("key", chat),
+      { initialProps: { chat: first } }
+    );
+
+    await waitFor(() => expect(result.current.total).toBeTruthy());
+
+    rerender({ chat: second });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    // Never carry the first chat's spend onto the second.
+    await waitFor(() => expect(result.current.total).toBeUndefined());
+    expect(result.current.costByRunId.size).toBe(0);
+  });
+
   it("skips the request without an API key", async () => {
     const fetchMock = mockUsageResponse({ runs: [] });
 

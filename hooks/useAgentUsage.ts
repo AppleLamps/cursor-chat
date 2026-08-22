@@ -82,6 +82,11 @@ export function useAgentUsage(
       return;
     }
 
+    // Drop the previous scope's numbers before loading this one. Without this,
+    // switching chats (or a read that fails outright) leaves another
+    // conversation's total on screen as if it belonged to this one.
+    setState({ usage: { runs: [] }, settled: false });
+
     const expectedRunIds = runIdKey.split(",");
     let cancelled = false;
     const controller = new AbortController();
