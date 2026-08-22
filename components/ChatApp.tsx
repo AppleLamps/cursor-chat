@@ -564,6 +564,7 @@ export default function ChatApp() {
           }
           onDeleteCloudAgent={() => void manageCloudAgent("delete")}
           conversationCost={agentUsage.total}
+          conversationCostPartial={agentUsage.partial}
         />
 
         {!hasMessages ? (

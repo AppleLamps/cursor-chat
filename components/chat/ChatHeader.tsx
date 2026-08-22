@@ -20,6 +20,7 @@ export default function ChatHeader({
   onAgentModeChange,
   prUrl,
   conversationCost,
+  conversationCostPartial,
   onChangeRepo,
   onToggleSidebar,
   onOpenMobileSidebar,
@@ -40,6 +41,7 @@ export default function ChatHeader({
   onAgentModeChange: (mode: AgentMode) => void;
   prUrl?: string;
   conversationCost?: ChatUsageCost;
+  conversationCostPartial?: boolean;
   onChangeRepo: () => void;
   onToggleSidebar: () => void;
   onOpenMobileSidebar: () => void;
@@ -137,9 +139,14 @@ export default function ChatHeader({
               className={`shrink-0 rounded-md bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground ${
                 chatCost.included ? "italic" : ""
               }`}
-              title={`This chat: ${chatCost.detail}`}
+              title={
+                conversationCostPartial
+                  ? `This chat: ${chatCost.detail} Earlier runs are not included — this chat recovered onto a new cloud agent.`
+                  : `This chat: ${chatCost.detail}`
+              }
             >
               {chatCost.label}
+              {conversationCostPartial ? "+" : null}
             </span>
           ) : null}
         </div>

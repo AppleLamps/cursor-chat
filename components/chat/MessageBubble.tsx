@@ -196,7 +196,7 @@ export default function MessageBubble({
               <span title={tokenUsageTitle || undefined}>{tokenUsageLabel}</span>
             </>
           ) : null}
-          {!isUser && !message.error && costDisplay ? (
+          {!isUser && costDisplay ? (
             <>
               <span aria-hidden="true">/</span>
               <span

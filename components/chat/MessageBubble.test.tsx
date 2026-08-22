@@ -168,6 +168,20 @@ describe("MessageBubble cost", () => {
     expect(view.queryByText("$0.00")).toBeNull();
   });
 
+  it("shows what a failed run cost instead of hiding the charge", () => {
+    const view = render(
+      <MessageBubble
+        message={{ ...completed, error: true, content: "The run failed." }}
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+        cost={{ rawCostCents: 90, chargedCents: 90 }}
+      />
+    );
+
+    expect(view.getByText("$0.90")).toBeTruthy();
+  });
+
   it("shows no cost while billing is still pending", () => {
     const view = render(
       <MessageBubble

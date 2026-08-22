@@ -16,13 +16,20 @@ const COST_RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 20_000];
 export type AgentUsageState = {
   costByRunId: Map<string, ChatUsageCost>;
   total: AgentUsagePayload["cost"];
+  /** True when the total omits runs from an agent that was replaced. */
+  partial: boolean;
   loading: boolean;
 };
 
-function completedRunIds(conversation: Conversation | null | undefined) {
+/**
+ * Every run that has stopped, including failed and cancelled ones — a run that
+ * errored partway can still have consumed billable tokens, so leaving it out
+ * would let the chat total silently undercount.
+ */
+function settledRunIds(conversation: Conversation | null | undefined) {
   if (!conversation) return [] as string[];
   return conversation.messages.flatMap((message) =>
-    message.role === "assistant" && !message.streaming && !message.error && message.runId
+    message.role === "assistant" && !message.streaming && message.runId
       ? [message.runId]
       : []
   );
@@ -37,7 +44,10 @@ export function useAgentUsage(
   apiKey: string | null,
   conversation: Conversation | null | undefined
 ): AgentUsageState {
-  const [usage, setUsage] = useState<AgentUsagePayload>({ runs: [] });
+  const [{ usage, settled }, setState] = useState<{
+    usage: AgentUsagePayload;
+    settled: boolean;
+  }>({ usage: { runs: [] }, settled: false });
   const [loading, setLoading] = useState(false);
   const requestRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,7 +61,7 @@ export function useAgentUsage(
     id: conversation?.modelId || DEFAULT_MODEL_SELECTION.id
   };
   // Refetch whenever a new run completes, not on every message mutation.
-  const runIdKey = completedRunIds(conversation).join(",");
+  const runIdKey = settledRunIds(conversation).join(",");
   // Serialized so the effect compares model by value, not by object identity.
   const modelKey = JSON.stringify(model);
 
@@ -67,7 +77,7 @@ export function useAgentUsage(
     clearRetry();
 
     if (!apiKey || !agentId || !agentSessionToken || !repoUrl || !runIdKey) {
-      setUsage({ runs: [] });
+      setState({ usage: { runs: [] }, settled: false });
       setLoading(false);
       return;
     }
@@ -99,14 +109,23 @@ export function useAgentUsage(
 
         const payload = normalizeAgentUsage(await response.json());
         if (cancelled || request !== requestRef.current) return;
-        setUsage(payload);
 
-        // Retry only while a completed run is still missing its cost.
-        const priced = new Set(
-          payload.runs.flatMap((run) => (run.cost ? [run.runId] : []))
-        );
-        const pending = expectedRunIds.some((runId) => !priced.has(runId));
-        if (pending && attempt < COST_RETRY_DELAYS_MS.length) {
+        // A run this agent has no record of never arrives — it belongs to an
+        // agent that was replaced. Only the newest run is plausibly still
+        // landing, so only it justifies waiting.
+        const reported = new Map(payload.runs.map((run) => [run.runId, run]));
+        const newestRunId = expectedRunIds.at(-1);
+        const pending =
+          expectedRunIds.some((runId) => {
+            const run = reported.get(runId);
+            return Boolean(run) && !run?.cost;
+          }) ||
+          (newestRunId !== undefined && !reported.has(newestRunId));
+        const willRetry = pending && attempt < COST_RETRY_DELAYS_MS.length;
+
+        setState({ usage: payload, settled: !willRetry });
+
+        if (willRetry) {
           retryTimerRef.current = setTimeout(
             () => void load(attempt + 1),
             COST_RETRY_DELAYS_MS[attempt]
@@ -147,5 +166,19 @@ export function useAgentUsage(
     return map;
   }, [usage.runs]);
 
-  return { costByRunId, total: usage.cost, loading };
+  /**
+   * Runs the current agent never reported. Recovering from a lost cloud agent
+   * replaces `conversation.agentId` while keeping the transcript, so earlier
+   * runs belong to an agent this total does not cover. Flag the shortfall
+   * instead of presenting an undercount as the whole bill.
+   */
+  const partial = useMemo(() => {
+    if (!settled) return false;
+    const reported = new Set(usage.runs.map((run) => run.runId));
+    return runIdKey
+      .split(",")
+      .some((runId) => Boolean(runId) && !reported.has(runId));
+  }, [settled, usage.runs, runIdKey]);
+
+  return { costByRunId, total: usage.cost, partial, loading };
 }
