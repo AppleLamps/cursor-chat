@@ -46,10 +46,11 @@ import { validateBranch, validateRepoUrl } from "@/lib/validate";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 import type { TerminationReason } from "@/lib/agent-run-termination";
 
-// Keep this compatible with Vercel Hobby while opting the route into the
-// longest duration available on that plan. The application timeout below fires
-// first so clients receive a structured SSE error instead of an abrupt EOF.
-export const maxDuration = 300;
+// Opts the route into the longest duration available on Vercel Pro/Enterprise
+// (Hobby is capped at 300s; lower this back to 300 if deploying on Hobby). The
+// application timeout below fires first so clients receive a structured SSE
+// error instead of an abrupt EOF.
+export const maxDuration = 800;
 
 type ChatRequest = {
   apiKey?: string;

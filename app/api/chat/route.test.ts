@@ -89,7 +89,7 @@ describe("chat route validation and rate limiting", () => {
   });
 
   it("declares a platform duration long enough for cloud agent runs", () => {
-    expect(maxDuration).toBe(300);
+    expect(maxDuration).toBe(800);
   });
 
   it("does not charge chat rate limits for invalid repositories", async () => {
