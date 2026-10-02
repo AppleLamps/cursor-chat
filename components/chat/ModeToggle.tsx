@@ -64,7 +64,7 @@ export default function ModeToggle({
               "inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring/45 active:translate-y-px",
               compact
                 ? "h-7 min-w-16 px-2 text-xs"
-                : "h-9 px-3 text-sm sm:px-4",
+                : "h-10 px-3 text-sm sm:h-9 sm:px-4",
               selected
                 ? "bg-foreground text-background shadow-sm"
                 : "text-muted-foreground hover:bg-background/80 hover:text-foreground"

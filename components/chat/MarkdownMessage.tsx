@@ -71,7 +71,7 @@ function MarkdownCodeBlock({
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className={`rounded-md px-2 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 ${
+          className={`rounded-md px-2 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 max-md:-my-1 max-md:px-3 max-md:py-2 ${
             isUser
               ? "text-white/80 hover:bg-white/10 hover:text-white focus:ring-white/30"
               : "text-[#555] hover:bg-white hover:text-[#111] focus:ring-[#d9d9d9]"

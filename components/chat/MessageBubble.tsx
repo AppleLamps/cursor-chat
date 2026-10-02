@@ -182,7 +182,7 @@ export default function MessageBubble({
           </BubbleContent>
         </Bubble>
 
-        <MessageFooter className="gap-2">
+        <MessageFooter className="flex-wrap gap-x-2 gap-y-0.5 [&>*]:whitespace-nowrap">
           <span>{roleLabel(message.role)}</span>
           <span aria-hidden="true">/</span>
           <time>{timeLabel(message.createdAt)}</time>
@@ -263,7 +263,7 @@ function SourcesPanel({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between text-left text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
+        className="flex min-h-10 w-full items-center justify-between text-left text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 md:min-h-0"
         aria-expanded={open ? "true" : "false"}
       >
         <span className="font-medium">Sources ({sources.length})</span>

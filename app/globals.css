@@ -8,6 +8,16 @@
 :root {
   --font-sans: "Manrope";
   --font-display: "Newsreader";
+  /* Visible app height/offset. useAppViewport() keeps these in sync with the
+     iOS keyboard; dvh is the no-JS fallback. */
+  --app-height: 100vh;
+  --app-top: 0px;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
 }
 
 * {
@@ -17,12 +27,28 @@
 html {
   min-height: 100%;
   background: var(--background);
+  /* Stop iOS inflating text after rotating to landscape. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   font-family: var(--font-sans), sans-serif;
+  /* No rubber-band bounce revealing the page behind the app shell. */
+  overscroll-behavior-y: none;
+}
+
+/* The chat screen: pinned to the visible viewport so the header stays put and
+   the composer rides above the iOS keyboard instead of the page scrolling. */
+.app-shell {
+  position: fixed;
+  top: var(--app-top);
+  left: 0;
+  right: 0;
+  height: var(--app-height);
 }
 
 ::selection {
@@ -36,8 +62,33 @@ input {
   font: inherit;
 }
 
-button {
+button,
+a,
+summary,
+[role="button"] {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Removes the double-tap-to-zoom delay on interactive controls. */
+a,
+button,
+summary,
+label,
+select,
+input,
+textarea,
+[role="button"],
+[role="option"] {
+  touch-action: manipulation;
+}
+
+/* iOS Safari zooms the whole page when a field under 16px is focused. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 .scrollbar-soft {

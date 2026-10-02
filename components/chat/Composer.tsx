@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, RefObject } from "react";
+import { FormEvent, KeyboardEvent, RefObject, useLayoutEffect } from "react";
 import { ImageIcon, LinkIcon, MicIcon, PaperclipIcon, SendIcon, SquareIcon, XIcon } from "lucide-react";
 import type { ImageAttachment, PdfAttachment } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
@@ -56,9 +56,18 @@ export default function Composer({
   onStop: () => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
+  // Grow with the text (up to the CSS max-height), then scroll inside.
+  useLayoutEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [value, inputRef]);
+
   return (
     <form onSubmit={onSubmit} className="mx-auto max-w-3xl">
-      <div className="rounded-2xl border border-border bg-card p-2 shadow-lg shadow-foreground/10 transition focus-within:border-ring">
+      <div className="rounded-[1.375rem] border border-border bg-card p-1.5 shadow-lg shadow-foreground/10 transition focus-within:border-ring sm:rounded-2xl sm:p-2">
         {images.length > 0 || pdfs.length > 0 ? (
           <AttachmentGroup className="px-2 pb-3 pt-1">
             {images.map((image) => (
@@ -115,7 +124,9 @@ export default function Composer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           rows={1}
-          className="max-h-44 min-h-[50px] w-full resize-none bg-transparent px-4 py-3 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
+          enterKeyHint="enter"
+          autoCapitalize="sentences"
+          className="max-h-40 min-h-[50px] w-full resize-none bg-transparent px-3.5 py-3 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-44 sm:px-4 [@media(max-height:500px)]:max-h-20"
           disabled={isSending}
         />
         <div className="flex items-center justify-between px-2 pb-1 pt-1">
@@ -128,6 +139,7 @@ export default function Composer({
               disabled={isSending || isReadingFiles}
               aria-label="Add image"
               title="Attach PNG, JPEG, WebP, or GIF"
+              className="max-md:size-11 max-md:[&_svg:not([class*='size-'])]:size-5"
             >
               {isReadingFiles ? <PaperclipIcon className="animate-pulse" /> : <ImageIcon />}
             </Button>
@@ -138,6 +150,7 @@ export default function Composer({
               onClick={onHostedImageClick}
               disabled={isSending || isReadingFiles}
               title="Attach hosted image URL"
+              className="max-md:h-11 max-md:px-3.5 max-md:text-sm"
             >
               <LinkIcon />
               URL
@@ -162,7 +175,7 @@ export default function Composer({
                 onClick={onStop}
                 aria-label="Stop generating"
                 title="Stop generating"
-                className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30"
+                className="h-11 w-11 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 md:h-10 md:w-10"
               >
                 <SquareIcon className="fill-current" />
               </Button>
@@ -172,7 +185,7 @@ export default function Composer({
                 size="icon-lg"
                 disabled={!canSend}
                 aria-label="Send message"
-                className="h-10 w-10 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground"
+                className="h-11 w-11 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground md:h-10 md:w-10"
               >
                 <SendIcon />
               </Button>
@@ -180,7 +193,7 @@ export default function Composer({
           </div>
         </div>
       </div>
-      <p className="mt-2 text-center text-[11px] text-muted-foreground">
+      <p className="mt-1.5 text-center text-[11px] leading-4 text-muted-foreground sm:mt-2 [@media(max-height:500px)]:hidden">
         {note || "AI can make mistakes. Check important info."}
       </p>
     </form>
