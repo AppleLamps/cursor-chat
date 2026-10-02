@@ -53,12 +53,23 @@ local development does not require Redis or a server-side Cursor key.
 To enable the branch picker, users may also connect GitHub. The token is sent
 only to the branch-listing endpoint and is not forwarded to Cursor.
 
+#### "Connect Cursor" button
+
+The first screen offers **Connect Cursor**, which uses the SDK's browser sign-in
+(`Cursor.auth.login()`): the user approves in a Cursor page and the app receives
+a named `AskCursor` API key that expires after 90 days. Nothing needs to be
+configured, and the key is not stored on the server (`store: null`, so the SDK
+does not write it to the server's credential file). Pasting a key still works.
+
+The sign-in request stays open while the user approves, so it is rate limited
+(5 per minute per client), capped at 25 pending per server instance, and given
+5 minutes. If the connection drops (a backgrounded mobile tab can lose it), the user
+taps Connect again or pastes a key.
+
 #### "Connect GitHub" button (optional)
 
-Cursor only issues API keys from its dashboard (there is no OAuth flow for
-third-party apps), so the Cursor key is always pasted. GitHub does support
-OAuth, so a deployment can offer a **Connect GitHub** button instead of asking
-users to create a personal access token:
+GitHub also supports OAuth, so a deployment can offer a **Connect GitHub**
+button instead of asking users to create a personal access token:
 
 1. Create a [GitHub OAuth App](https://github.com/settings/developers) with the
    authorization callback URL `https://<your-host>/api/auth/github/callback`
