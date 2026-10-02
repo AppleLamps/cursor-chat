@@ -61,4 +61,28 @@ describe("chat cancellation route", () => {
     expect(response.status).toBe(409);
     expect(cancelRun).not.toHaveBeenCalled();
   });
+
+  it("still stops a run on a branch that Implement policy would now refuse", async () => {
+    const scope = { ...requestBody, branch: "main" };
+    const agentSessionToken = createAgentSessionToken(scope);
+    const response = await POST(request({ ...scope, agentSessionToken }));
+
+    expect(response.status).toBe(200);
+    expect(cancelRun).toHaveBeenCalledOnce();
+  });
+
+  it("answers 400 rather than throwing on non-string fields", async () => {
+    const response = await POST(request({ ...requestBody, apiKey: 7, runId: {} }));
+
+    expect(response.status).toBe(400);
+    expect(cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized control bodies", async () => {
+    const response = await POST(
+      request({ ...requestBody, padding: "x".repeat(17_000) })
+    );
+
+    expect(response.status).toBe(413);
+  });
 });

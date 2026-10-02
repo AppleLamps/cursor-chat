@@ -1,5 +1,6 @@
 "use client";
 
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import { isCoarsePointer } from "@/lib/touch";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "@/components/BranchPicker";
@@ -84,6 +85,8 @@ export default function RepoPicker({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(modalRef, { active: mode === "modal", onClose: onCancel });
 
   const modeDescription =
     description ??
@@ -322,6 +325,7 @@ export default function RepoPicker({
     return (
       <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 sm:items-center sm:px-4 sm:py-8">
         <div
+          ref={modalRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="repo-picker-title"

@@ -2,11 +2,10 @@ import { Agent, CursorSdkError, type ModelSelection } from "@cursor/sdk";
 import { NextResponse } from "next/server";
 import { parseAgentMode } from "@/lib/agent-mode";
 import { verifyAgentSessionToken } from "@/lib/agent-session";
-import { MAX_CHAT_BODY_BYTES } from "@/lib/chat-images";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
 import { normalizeModelSelection } from "@/lib/model-catalog";
-import { readJsonBody } from "@/lib/rate-limit";
-import { validateBranch, validateRepoUrl } from "@/lib/validate";
+import { readControlBody } from "@/lib/rate-limit";
+import { trimmedString, validateBranch, validateRepoUrl } from "@/lib/validate";
 
 type LifecycleAction = "archive" | "unarchive" | "delete";
 
@@ -23,19 +22,16 @@ type LifecycleRequest = {
 };
 
 export async function POST(request: Request) {
-  const parsedBody = await readJsonBody<LifecycleRequest>(
-    request,
-    MAX_CHAT_BODY_BYTES
-  );
+  const parsedBody = await readControlBody<LifecycleRequest>(request);
   if (!parsedBody.ok) return parsedBody.response;
 
   const body = parsedBody.body;
-  const action = body.action;
-  const apiKey = body.apiKey?.trim();
-  const agentId = body.agentId?.trim();
-  const agentSessionToken = body.agentSessionToken?.trim();
+  const action = trimmedString(body.action) as LifecycleAction | undefined;
+  const apiKey = trimmedString(body.apiKey);
+  const agentId = trimmedString(body.agentId);
+  const agentSessionToken = trimmedString(body.agentSessionToken);
   const repoValidation = validateRepoUrl(body.repoUrl);
-  const branchValidation = validateBranch(body.branch?.trim() || DEFAULT_BRANCH);
+  const branchValidation = validateBranch(trimmedString(body.branch) || DEFAULT_BRANCH);
   const agentMode = parseAgentMode(body.agentMode);
   const model = normalizeModelSelection(body.model, body.modelId);
 
