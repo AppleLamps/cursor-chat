@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BRANCH_PRESETS, DEFAULT_BRANCH } from "@/lib/defaults";
 import { fetchBranches } from "@/lib/repo";
 
@@ -24,6 +24,9 @@ export default function BranchPicker({
   const [error, setError] = useState<string | null>(null);
 
   const enhancedMode = Boolean(githubToken?.trim());
+  // Read inside the fetch callback without re-running the fetch on every edit.
+  const branchRef = useRef(branch);
+  branchRef.current = branch;
 
   useEffect(() => {
     if (!enhancedMode || !repoUrl.trim()) {
@@ -48,10 +51,16 @@ export default function BranchPicker({
         setBranches(result.branches);
         setDefaultBranch(result.defaultBranch);
 
-        if (result.defaultBranch) {
-          onBranchChange(result.defaultBranch);
-        } else if (result.branches.length > 0) {
-          onBranchChange(result.branches[0]);
+        // Only fall back to the default when the current branch does not exist
+        // in this repo. Otherwise opening "change repository" just to switch
+        // models would silently move a chat off its feature branch.
+        const current = branchRef.current.trim();
+        if (!current || !result.branches.includes(current)) {
+          if (result.defaultBranch) {
+            onBranchChange(result.defaultBranch);
+          } else if (result.branches.length > 0) {
+            onBranchChange(result.branches[0]);
+          }
         }
       } catch (caught) {
         if (cancelled) return;

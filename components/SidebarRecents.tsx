@@ -172,7 +172,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:min-h-0"
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#bdbdbd] md:min-h-0"
         title={conversation.title}
       >
         <span className="min-w-0 flex-1 truncate text-sm text-[#404040]">
@@ -185,7 +185,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={onRename}
-        className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-[#777] transition hover:bg-[#dedede] hover:text-[#111] group-hover:flex active:bg-[#dedede] [@media(hover:none)]:flex md:h-7 md:w-7"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[#777] opacity-0 transition hover:bg-[#dedede] hover:text-[#111] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#bdbdbd] group-focus-within:opacity-100 group-hover:opacity-100 active:bg-[#dedede] [@media(hover:none)]:opacity-100 md:h-7 md:w-7"
         aria-label={`Rename ${conversation.title}`}
         title="Rename"
       >
@@ -194,7 +194,7 @@ function ConversationRow({
       <button
         type="button"
         onClick={onDelete}
-        className="mr-1 hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-[#777] transition hover:bg-[#dedede] hover:text-[#111] group-hover:flex active:bg-[#dedede] [@media(hover:none)]:flex md:h-7 md:w-7"
+        className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[#777] opacity-0 transition hover:bg-[#dedede] hover:text-[#111] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#bdbdbd] group-focus-within:opacity-100 group-hover:opacity-100 active:bg-[#dedede] [@media(hover:none)]:opacity-100 md:h-7 md:w-7"
         aria-label={`Delete local chat ${conversation.title}`}
         title="Delete local chat only"
       >

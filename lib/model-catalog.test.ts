@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearModelCatalogCacheForTests,
   getModelCatalog,
+  isAuthFailure,
   normalizeModelSelection,
   validateSelectionAgainstCatalog
 } from "@/lib/model-catalog";
@@ -153,5 +154,43 @@ describe("Cursor model catalog", () => {
   it("rejects malformed selections rather than silently changing them", () => {
     expect(normalizeModelSelection({ id: "", params: [] })).toBeNull();
     expect(normalizeModelSelection({ id: "router", params: "cost" })).toBeNull();
+  });
+
+  it("remembers a failed lookup briefly so a bad key cannot hammer Cursor", async () => {
+    const failure = Object.assign(new Error("unauthorized"), { status: 401 });
+    listModels.mockRejectedValue(failure);
+
+    await expect(getModelCatalog("bad-key")).rejects.toBe(failure);
+    await expect(getModelCatalog("bad-key")).rejects.toBe(failure);
+    expect(listModels).toHaveBeenCalledTimes(1);
+
+    // Another key is not affected.
+    listModels.mockResolvedValue([{ id: "m", displayName: "M" } as never]);
+    await expect(getModelCatalog("good-key")).resolves.toMatchObject({
+      fallback: false
+    });
+    expect(listModels).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries after the failure window passes", async () => {
+    vi.useFakeTimers();
+    try {
+      listModels.mockRejectedValueOnce(new Error("blip"));
+      await expect(getModelCatalog("k")).rejects.toThrow("blip");
+
+      vi.advanceTimersByTime(16_000);
+      listModels.mockResolvedValue([{ id: "m", displayName: "M" } as never]);
+      await expect(getModelCatalog("k")).resolves.toMatchObject({ fallback: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recognizes key rejections by status", () => {
+    expect(isAuthFailure(Object.assign(new Error("x"), { status: 401 }))).toBe(true);
+    expect(isAuthFailure(Object.assign(new Error("x"), { status: 403 }))).toBe(true);
+    expect(isAuthFailure(Object.assign(new Error("x"), { status: 500 }))).toBe(false);
+    expect(isAuthFailure(new Error("x"))).toBe(false);
+    expect(isAuthFailure(null)).toBe(false);
   });
 });

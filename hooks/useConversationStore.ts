@@ -17,8 +17,12 @@ import {
 import {
   hydrateConversationsFromStorage,
   pruneStoredImages,
-  serializeConversationsForStorage
+  serializeConversationsForStorage,
+  serializeConversationsSync,
+  writePendingImages
 } from "@/lib/chat-attachment-storage";
+import { backupCorruptHistory, persistHistory } from "@/lib/history-storage";
+import { buildHistoryExport, planHistoryImport } from "@/lib/history-transfer";
 import {
   activeConversation as getActiveConversation,
   conversationReducer
@@ -45,32 +49,46 @@ import {
 
 type UseConversationStoreOptions = {
   apiKey: string | null;
-  onError: (message: string) => void;
 };
 
 const STORAGE_KEY = STORAGE_KEYS.CONVERSATIONS;
 
+/** Wait this long after the last change before writing the whole history. */
+const PERSIST_DEBOUNCE_MS = 600;
+
+const STORAGE_FULL_WARNING =
+  "Browser storage is full, so new messages are not being saved. Delete old chats to free space.";
+const STORAGE_TRIMMED_WARNING =
+  "Browser storage is nearly full. Older chats lost their reasoning trace to make room.";
+const STORAGE_BLOCKED_WARNING =
+  "This browser is blocking site storage, so your chats will be lost when you close the tab.";
+const STORAGE_UNREADABLE_WARNING =
+  "Your saved chats could not be read. A backup copy was kept in this browser.";
+
 async function parseStoredConversations(raw: string | null) {
   const decoded = decodeConversationStorage(raw);
+  const now = Date.now();
   const conversations = sortConversations(
     await hydrateConversationsFromStorage(
-      decoded.conversations.filter(isConversation).map(normalizeConversation)
+      decoded.conversations
+        .filter(isConversation)
+        // Explicit arrow: map would pass the index as normalizeConversation's `now`.
+        .map((conversation) => normalizeConversation(conversation, now))
     )
   );
   return { conversations, tombstones: decoded.tombstones };
 }
 
-export function useConversationStore({
-  apiKey,
-  onError
-}: UseConversationStoreOptions) {
+export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
   const [state, dispatch] = useReducer(conversationReducer, {
     conversations: [],
     activeConversationId: createConversation().id
   });
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const seededDefaultConversationRef = useRef(false);
   const persistenceRunRef = useRef(0);
+  const persistTimerRef = useRef<number | null>(null);
   const externalSyncPausedRef = useRef(false);
   const pendingExternalStorageRef = useRef<string | null | undefined>(undefined);
   const tombstonesRef = useRef<ConversationTombstones>({});
@@ -107,10 +125,20 @@ export function useConversationStore({
     let cancelled = false;
 
     async function hydrateHistory() {
+      let raw: string | null = null;
+
       try {
-        const saved = await parseStoredConversations(
-          window.localStorage.getItem(STORAGE_KEY)
-        );
+        raw = window.localStorage.getItem(STORAGE_KEY);
+      } catch {
+        if (!cancelled) {
+          setStorageWarning(STORAGE_BLOCKED_WARNING);
+          setHasHydrated(true);
+        }
+        return;
+      }
+
+      try {
+        const saved = await parseStoredConversations(raw);
 
         if (cancelled) return;
 
@@ -124,7 +152,14 @@ export function useConversationStore({
         }
       } catch {
         if (!cancelled) {
-          window.localStorage.removeItem(STORAGE_KEY);
+          // Keep what we could not read before the next save replaces it.
+          const kept = backupCorruptHistory(window.localStorage, STORAGE_KEY, raw);
+          try {
+            window.localStorage.removeItem(STORAGE_KEY);
+          } catch {
+            // Nothing more to do.
+          }
+          setStorageWarning(kept ? STORAGE_UNREADABLE_WARNING : STORAGE_BLOCKED_WARNING);
         }
       } finally {
         if (!cancelled) setHasHydrated(true);
@@ -138,38 +173,91 @@ export function useConversationStore({
     };
   }, []);
 
-  useEffect(() => {
-    if (!hasHydrated) return;
-
+  const persistNow = useCallback(async () => {
     const run = persistenceRunRef.current + 1;
     persistenceRunRef.current = run;
 
-    void (async () => {
-      try {
-        const {
-          conversations: serializedConversations,
-          activeImageKeys
-        } = await serializeConversationsForStorage(state.conversations);
+    try {
+      const { conversations: serialized, activeImageKeys } =
+        await serializeConversationsForStorage(stateRef.current.conversations);
 
-        if (persistenceRunRef.current !== run) return;
+      if (persistenceRunRef.current !== run) return;
 
-        window.localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(
-            encodeConversationStorage(
-              serializedConversations,
-              tombstonesRef.current
-            )
-          )
+      const outcome = persistHistory(
+        window.localStorage,
+        STORAGE_KEY,
+        serialized,
+        tombstonesRef.current
+      );
+
+      if (outcome.ok) {
+        setStorageWarning((current) =>
+          outcome.trimmed
+            ? STORAGE_TRIMMED_WARNING
+            : current === STORAGE_FULL_WARNING || current === STORAGE_TRIMMED_WARNING
+              ? null
+              : current
         );
         void pruneStoredImages(activeImageKeys).catch(() => undefined);
-      } catch {
-        if (persistenceRunRef.current === run) {
-          onError("Could not save chat history in this browser.");
-        }
+      } else {
+        setStorageWarning(
+          outcome.reason === "quota" ? STORAGE_FULL_WARNING : STORAGE_BLOCKED_WARNING
+        );
       }
-    })();
-  }, [state.conversations, hasHydrated, onError]);
+    } catch {
+      if (persistenceRunRef.current === run) {
+        setStorageWarning(STORAGE_BLOCKED_WARNING);
+      }
+    }
+  }, []);
+
+  // Save shortly after the last change rather than on every streamed token and
+  // keystroke: the whole history is one JSON string, so each save is O(history).
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = window.setTimeout(() => {
+      persistTimerRef.current = null;
+      void persistNow();
+    }, PERSIST_DEBOUNCE_MS);
+  }, [state.conversations, hasHydrated, persistNow]);
+
+  // A pending save must not be lost when the tab is hidden, closed or unmounted.
+  // Synchronous on purpose: async work is not guaranteed to finish at pagehide.
+  const flushPendingSave = useCallback(() => {
+    if (persistTimerRef.current === null) return;
+
+    window.clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = null;
+
+    try {
+      const { conversations, pendingWrites } = serializeConversationsSync(
+        stateRef.current.conversations
+      );
+      void writePendingImages(pendingWrites);
+      persistHistory(window.localStorage, STORAGE_KEY, conversations, tombstonesRef.current);
+    } catch {
+      // Best effort while the page is going away.
+    }
+  }, []);
+
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "hidden") flushPendingSave();
+    }
+
+    window.addEventListener("pagehide", flushPendingSave);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.removeEventListener("pagehide", flushPendingSave);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      flushPendingSave();
+    };
+  }, [flushPendingSave]);
 
   useEffect(() => {
     if (!hasHydrated || !apiKey || seededDefaultConversationRef.current) return;
@@ -222,6 +310,27 @@ export function useConversationStore({
     },
     [hydrateExternalStorage]
   );
+
+  const dismissStorageWarning = useCallback(() => setStorageWarning(null), []);
+
+  const exportHistory = useCallback(
+    () => buildHistoryExport(stateRef.current.conversations),
+    []
+  );
+
+  const importHistory = useCallback((incoming: Conversation[]) => {
+    const plan = planHistoryImport(stateRef.current.conversations, incoming);
+
+    if (plan.accepted.length > 0) {
+      // An explicit import brings back chats that were deleted here earlier.
+      for (const conversation of plan.accepted) {
+        delete tombstonesRef.current[conversation.id];
+      }
+      dispatch({ type: "import", conversations: plan.accepted });
+    }
+
+    return plan;
+  }, []);
 
   const createAndActivateConversation = useCallback((conversation: Conversation) => {
     delete tombstonesRef.current[conversation.id];
@@ -364,6 +473,10 @@ export function useConversationStore({
       activeAgentMode,
       activeModelId,
       hasHydrated,
+      storageWarning,
+      dismissStorageWarning,
+      exportHistory,
+      importHistory,
       canChangeAgentMode: messages.length === 0,
       lastUserMessage: latestUserMessage(messages),
       lastAssistantErrored: messages[messages.length - 1]?.error === true,
@@ -392,6 +505,10 @@ export function useConversationStore({
       activeAgentMode,
       activeModelId,
       hasHydrated,
+      storageWarning,
+      dismissStorageWarning,
+      exportHistory,
+      importHistory,
       createAndActivateConversation,
       activateConversation,
       updateConversationRepo,

@@ -53,12 +53,23 @@ local development does not require Redis or a server-side Cursor key.
 To enable the branch picker, users may also connect GitHub. The token is sent
 only to the branch-listing endpoint and is not forwarded to Cursor.
 
+#### "Connect Cursor" button
+
+The first screen offers **Connect Cursor**, which uses the SDK's browser sign-in
+(`Cursor.auth.login()`): the user approves in a Cursor page and the app receives
+a named `AskCursor` API key that expires after 90 days. Nothing needs to be
+configured, and the key is not stored on the server (`store: null`, so the SDK
+does not write it to the server's credential file). Pasting a key still works.
+
+The sign-in request stays open while the user approves, so it is rate limited
+(5 per minute per client), capped at 25 pending per server instance, and given
+5 minutes. If the connection drops (a backgrounded mobile tab can lose it), the user
+taps Connect again or pastes a key.
+
 #### "Connect GitHub" button (optional)
 
-Cursor only issues API keys from its dashboard (there is no OAuth flow for
-third-party apps), so the Cursor key is always pasted. GitHub does support
-OAuth, so a deployment can offer a **Connect GitHub** button instead of asking
-users to create a personal access token:
+GitHub also supports OAuth, so a deployment can offer a **Connect GitHub**
+button instead of asking users to create a personal access token:
 
 1. Create a [GitHub OAuth App](https://github.com/settings/developers) with the
    authorization callback URL `https://<your-host>/api/auth/github/callback`
@@ -84,23 +95,26 @@ When they are unset the app behaves exactly as before.
 
 | Mode | Intended use | Behavior |
 | --- | --- | --- |
-| **Ask** | Understand a codebase | Read-only investigation and explanation |
-| **Plan** | Design a safe change | Read-only investigation and an implementation-ready plan |
+| **Ask** | Understand a codebase | Read-only by instruction (system prompt only) |
+| **Plan** | Design a safe change | Read-only by instruction, run in the SDK's `plan` mode |
 | **Implement** | Complete a scoped task | May edit code, commit changes, and open a pull request |
 
 The selected mode is fixed after the first message. Start a new conversation to
 switch modes.
 
-Ask and Plan are enforced through mode-specific system prompts and Cursor SDK
-settings. For a stronger repository-level boundary, install the example
-[read-only Cursor hooks](docs/hooks.example.json) in each target repository.
-Prompt instructions alone are not a hard security boundary.
+Ask is enforced only through its system prompt; Plan adds the SDK's `plan`
+mode. The Cursor SDK has no hard read-only switch for cloud agents, so neither
+is a security boundary, and a prompt-injected repository could still try to make
+an Ask run write. For a real boundary, install the example
+[read-only Cursor hooks](docs/hooks.example.json) in each target repository, or
+use a Cursor key and GitHub integration that cannot write to it.
 
 Implement mode is intentionally privileged:
 
 - The user must explicitly confirm the first write-capable run.
 - Protected branches are denied by default, including `main`, `master`,
-  `production`, `release/*`, and `hotfix/*`.
+  `production`, `release/*`, and `hotfix/*`. `refs/heads/main` is treated as
+  `main`.
 - Deployments can disable the mode or restrict allowed owners, repositories, and
   branches.
 - Follow-up requests require a signed session token bound to the API key,
@@ -124,7 +138,11 @@ access.
 - GitHub source links for files inspected by the agent
 - Pull request links returned by successful Implement runs
 - PNG, JPEG, WebP, and GIF attachments, up to five images per message
-- Local conversation history with rename, delete, and cross-tab synchronization
+- Local conversation history with rename, delete, undo delete, search across
+  titles and message text, and cross-tab synchronization
+- Chat export and import (Settings): a JSON file with your questions, answers
+  and attached images, but never keys or cloud agent links. Import adds new
+  chats and takes an imported copy only when it is newer
 - Per-response duration, model, request ID, and token usage when reported by
   Cursor
 
@@ -180,11 +198,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | Variable | Purpose |
 | --- | --- |
 | `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS` | Maximum concurrent chat streams; defaults to `50` |
+| `ASKCURSOR_MAX_ACTIVE_STREAMS_PER_USER` | Maximum concurrent streams per Cursor key; defaults to `3` |
+| `ASKCURSOR_TRUSTED_IP_HEADER` | Header carrying the real client IP behind your proxy (for example `x-real-ip`); unset uses `x-forwarded-for` |
+| `ASKCURSOR_GITHUB_OAUTH_SCOPE` | `repo` (default) or `public_repo` for the Connect GitHub flow |
 | `ASKCURSOR_ENABLE_IMPLEMENT_MODE` | Set to `false` to disable Implement mode |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_OWNERS` | Comma-separated owner allowlist |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_REPOS` | Comma-separated repository allowlist |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES` | Comma-separated branch allowlist |
-| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Override the default protected-branch patterns |
+| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Extra protected-branch patterns, added to the defaults |
 | `ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES` | Set to `true` to permit protected branches |
 
 Allowlist values support `*` wildcards. See [.env.example](.env.example) for

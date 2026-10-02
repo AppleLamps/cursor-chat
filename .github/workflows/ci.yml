@@ -33,6 +33,11 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      # The rate-limit Lua scripts are tested against a real Redis; without the
+      # binary those tests are skipped.
+      - name: Install redis-server
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+
       - name: Test
         run: npm test
 

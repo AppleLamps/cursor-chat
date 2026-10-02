@@ -19,6 +19,7 @@ import {
 import {
   getFallbackModelCatalog,
   getModelCatalog,
+  isAuthFailure,
   normalizeModelSelection,
   validateSelectionAgainstCatalog
 } from "@/lib/model-catalog";
@@ -32,7 +33,8 @@ import {
   claimChatConcurrencySlot,
   limiterUnavailableResponse,
   readJsonBody,
-  rateLimitedResponse
+  rateLimitedResponse,
+  type RateLimitResult
 } from "@/lib/rate-limit";
 import {
   createAgentSessionToken,
@@ -42,7 +44,7 @@ import { validateAgentPolicy } from "@/lib/agent-policy";
 import { extractSourcePaths } from "@/lib/sources";
 import { extractThinkingFromConversation } from "@/lib/thinking";
 import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
-import { validateBranch, validateRepoUrl } from "@/lib/validate";
+import { trimmedString, validateBranch, validateRepoUrl } from "@/lib/validate";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 import type { TerminationReason } from "@/lib/agent-run-termination";
 
@@ -510,31 +512,45 @@ async function pollRunUntilTerminal({
   return null;
 }
 
+function limitedResponse(result: Exclude<RateLimitResult, { allowed: true }>) {
+  return result.unavailable
+    ? limiterUnavailableResponse()
+    : rateLimitedResponse(result.retryAfterSeconds);
+}
+
 export async function POST(request: Request) {
+  // A cheap per-IP guard before the body is read, so oversized or junk
+  // requests cannot be used to burn CPU while the precise limits wait on the
+  // validated API key.
+  const preflight = await checkRateLimit("chatPreflight", request);
+  if (!preflight.allowed) return limitedResponse(preflight);
+
   const parsedBody = await readJsonBody<ChatRequest>(request, MAX_CHAT_BODY_BYTES);
   if (!parsedBody.ok) return parsedBody.response;
 
   const body = parsedBody.body;
 
-  const apiKey = body.apiKey?.trim();
+  const apiKey = trimmedString(body.apiKey);
   const agentMode = parseAgentMode(body.agentMode);
-  const prompt = body.prompt?.trim();
+  const prompt = trimmedString(body.prompt);
   const repoValidation = validateRepoUrl(body.repoUrl);
   if (!repoValidation.ok) {
     return NextResponse.json({ error: repoValidation.error }, { status: 400 });
   }
 
-  const branchValidation = validateBranch(body.branch?.trim() || DEFAULT_BRANCH);
+  const branchValidation = validateBranch(
+    trimmedString(body.branch) || DEFAULT_BRANCH
+  );
   if (!branchValidation.ok) {
     return NextResponse.json({ error: branchValidation.error }, { status: 400 });
   }
 
   const repoUrl = repoValidation.value.url;
   const branch = branchValidation.value;
-  const agentId = body.agentId?.trim();
-  const agentSessionToken = body.agentSessionToken?.trim();
-  const turnId = body.turnId?.trim();
-  const recoverRunId = body.recoverRunId?.trim();
+  const agentId = trimmedString(body.agentId);
+  const agentSessionToken = trimmedString(body.agentSessionToken);
+  const turnId = trimmedString(body.turnId);
+  const recoverRunId = trimmedString(body.recoverRunId);
 
   if (!apiKey) {
     return NextResponse.json({ error: "API key is required." }, { status: 400 });
@@ -547,22 +563,6 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-
-  let modelSelection = requestedModel;
-  if (!recoverRunId) {
-    let catalog;
-    try {
-      catalog = await getModelCatalog(apiKey);
-    } catch {
-      catalog = getFallbackModelCatalog();
-    }
-    const validation = validateSelectionAgainstCatalog(requestedModel, catalog);
-    if (!validation.ok) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
-    }
-    modelSelection = validation.value;
-  }
-  const modelId = modelSelection.id;
 
   if (
     !turnId ||
@@ -594,6 +594,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: policy.error }, { status: policy.status });
   }
 
+  const sdkImages = chatImagesToSdk(parseChatImages(body.images));
+
+  if (!recoverRunId && !prompt && sdkImages.length === 0) {
+    return NextResponse.json({ error: "A prompt or image is required." }, { status: 400 });
+  }
+
+  if (prompt && prompt.length > MAX_PROMPT_CHARS) {
+    return NextResponse.json(
+      {
+        error: `Prompt is too long. Keep it under ${MAX_PROMPT_CHARS.toLocaleString()} characters.`
+      },
+      { status: 413 }
+    );
+  }
+
+  let modelSelection = requestedModel;
+  if (!recoverRunId) {
+    let catalog;
+    try {
+      catalog = await getModelCatalog(apiKey);
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        return NextResponse.json(
+          { error: "The Cursor API key was rejected. Check the key and try again." },
+          { status: 401 }
+        );
+      }
+      catalog = getFallbackModelCatalog();
+    }
+    const validation = validateSelectionAgainstCatalog(requestedModel, catalog);
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    modelSelection = validation.value;
+  }
+  const modelId = modelSelection.id;
+
   if (agentId) {
     const session = verifyAgentSessionToken(agentSessionToken, {
       agentId,
@@ -616,45 +653,46 @@ export async function POST(request: Request) {
     }
   }
 
-  const sdkImages = chatImagesToSdk(parseChatImages(body.images));
-
-  if (!recoverRunId && !prompt && sdkImages.length === 0) {
-    return NextResponse.json({ error: "A prompt or image is required." }, { status: 400 });
-  }
-
-  if (prompt && prompt.length > MAX_PROMPT_CHARS) {
-    return NextResponse.json(
-      {
-        error: `Prompt is too long. Keep it under ${MAX_PROMPT_CHARS.toLocaleString()} characters.`
-      },
-      { status: 413 }
-    );
-  }
-
+  // Requests rejected above never spend quota. The catalog lookup is bounded
+  // by the preflight limit and the per-key (and failure) cache.
+  // The precise per-IP and per-key limits come before the catalog lookup, which
+  // makes an upstream call on every cache miss.
   const rateLimit = await checkRateLimit(
     isImplementMode(agentMode) ? "chatImplement" : "chat",
     request,
     { apiKey }
   );
-  if (!rateLimit.allowed) {
-    if (rateLimit.unavailable) {
-      return limiterUnavailableResponse();
-    }
-
-    return rateLimitedResponse(rateLimit.retryAfterSeconds);
-  }
+  if (!rateLimit.allowed) return limitedResponse(rateLimit);
 
   const promptText = buildUserPrompt(prompt || defaultImagePrompt());
-  const concurrencySlot = await claimChatConcurrencySlot();
+  const concurrencySlot = await claimChatConcurrencySlot(apiKey);
   if (!concurrencySlot.allowed) {
-    if (concurrencySlot.unavailable) {
-      return limiterUnavailableResponse();
+    if (concurrencySlot.unavailable) return limiterUnavailableResponse();
+
+    if (concurrencySlot.reason === "per-user") {
+      return NextResponse.json(
+        {
+          error:
+            "You already have several runs in progress. Wait for one to finish, or stop one, then try again."
+        },
+        {
+          status: 429,
+          headers: { "Retry-After": String(concurrencySlot.retryAfterSeconds) }
+        }
+      );
     }
 
     return rateLimitedResponse(concurrencySlot.retryAfterSeconds);
   }
 
+  // Set once the stream starts; lets the consumer's cancel() take the same
+  // detach path as a request abort.
+  let detachOnCancel: (() => void) | undefined;
+
   const stream = new ReadableStream<Uint8Array>({
+    cancel() {
+      detachOnCancel?.();
+    },
     async start(controller) {
       const encoder = new TextEncoder();
       const runTimeoutMs = parseChatRunTimeoutMs();
@@ -665,23 +703,34 @@ export async function POST(request: Request) {
       let resolvedAgentIdForLog = agentId;
       let terminationPromise: Promise<void> | null = null;
 
-      const send = (event: ChatStreamEventName, data: Record<string, unknown>) => {
+      // enqueue/close throw once the consumer has cancelled the stream, which
+      // must never escape into the run loop.
+      const enqueue = (chunk: string) => {
         if (streamClosed) return;
-        controller.enqueue(encoder.encode(formatSseEvent(event, data)));
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch {
+          streamClosed = true;
+        }
+      };
+
+      const send = (event: ChatStreamEventName, data: Record<string, unknown>) => {
+        enqueue(formatSseEvent(event, data));
       };
 
       const closeStream = () => {
         if (streamClosed) return;
         streamClosed = true;
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // Already cancelled by the consumer.
+        }
       };
 
-      const sendHeartbeat = () => {
-        if (streamClosed) return;
-        // SSE comments are ignored by the client parser but keep the HTTP
-        // response active while the agent is busy without emitting SDK events.
-        controller.enqueue(encoder.encode(": heartbeat\n\n"));
-      };
+      // SSE comments are ignored by the client parser but keep the HTTP
+      // response active while the agent is busy without emitting SDK events.
+      const sendHeartbeat = () => enqueue(": heartbeat\n\n");
 
       const releaseSlot = async () => {
         if (slotReleased) return;
@@ -729,6 +778,7 @@ export async function POST(request: Request) {
         void terminateRun("abort");
       };
       request.signal.addEventListener("abort", handleRequestAbort, { once: true });
+      detachOnCancel = handleRequestAbort;
 
       const timeout = setTimeout(() => {
         void terminateRun("timeout");
@@ -770,9 +820,10 @@ export async function POST(request: Request) {
           runId: started.run.id
         });
 
-        if (request.signal.aborted) {
-          // The request may have been aborted while Agent.create/resume was
-          // still pending, before there was a run available to cancel.
+        if (request.signal.aborted || streamClosed) {
+          // The request may have been aborted (or the client cancelled the
+          // stream, or the deadline passed) while Agent.create/resume was still
+          // pending, before there was an agent to dispose of.
           terminationPromise = null;
           await terminateRun("abort");
           return;

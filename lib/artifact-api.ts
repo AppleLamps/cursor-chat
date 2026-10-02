@@ -5,7 +5,7 @@ import { validateAgentPolicy } from "@/lib/agent-policy";
 import { verifyAgentSessionToken } from "@/lib/agent-session";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
 import { normalizeModelSelection } from "@/lib/model-catalog";
-import { validateBranch, validateRepoUrl } from "@/lib/validate";
+import { trimmedString, validateBranch, validateRepoUrl } from "@/lib/validate";
 
 export const MAX_ARTIFACT_COUNT = 200;
 export const MAX_ARTIFACT_BYTES = 50 * 1024 * 1024;
@@ -30,12 +30,12 @@ export function authorizeArtifactRequest(body: ArtifactRequest):
       path?: string;
     }
   | { ok: false; response: NextResponse } {
-  const apiKey = body.apiKey?.trim();
-  const agentId = body.agentId?.trim();
-  const agentSessionToken = body.agentSessionToken?.trim();
+  const apiKey = trimmedString(body.apiKey);
+  const agentId = trimmedString(body.agentId);
+  const agentSessionToken = trimmedString(body.agentSessionToken);
   const agentMode = parseAgentMode(body.agentMode);
   const repoValidation = validateRepoUrl(body.repoUrl);
-  const branchValidation = validateBranch(body.branch?.trim() || DEFAULT_BRANCH);
+  const branchValidation = validateBranch(trimmedString(body.branch) || DEFAULT_BRANCH);
   const model = normalizeModelSelection(body.model, body.modelId);
 
   if (!apiKey || !agentId) {
