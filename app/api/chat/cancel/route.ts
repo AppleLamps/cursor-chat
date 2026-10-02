@@ -1,13 +1,11 @@
 import { Agent, CursorSdkError, type ModelSelection } from "@cursor/sdk";
 import { NextResponse } from "next/server";
 import { parseAgentMode } from "@/lib/agent-mode";
-import { validateAgentPolicy } from "@/lib/agent-policy";
 import { verifyAgentSessionToken } from "@/lib/agent-session";
-import { MAX_CHAT_BODY_BYTES } from "@/lib/chat-images";
-import { readJsonBody } from "@/lib/rate-limit";
+import { readControlBody } from "@/lib/rate-limit";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
 import { normalizeModelSelection } from "@/lib/model-catalog";
-import { validateBranch, validateRepoUrl } from "@/lib/validate";
+import { trimmedString, validateBranch, validateRepoUrl } from "@/lib/validate";
 
 type CancelRequest = {
   apiKey?: string;
@@ -22,20 +20,17 @@ type CancelRequest = {
 };
 
 export async function POST(request: Request) {
-  const parsedBody = await readJsonBody<CancelRequest>(
-    request,
-    MAX_CHAT_BODY_BYTES
-  );
+  const parsedBody = await readControlBody<CancelRequest>(request);
   if (!parsedBody.ok) return parsedBody.response;
 
   const body = parsedBody.body;
-  const apiKey = body.apiKey?.trim();
-  const agentId = body.agentId?.trim();
-  const agentSessionToken = body.agentSessionToken?.trim();
-  const runId = body.runId?.trim();
+  const apiKey = trimmedString(body.apiKey);
+  const agentId = trimmedString(body.agentId);
+  const agentSessionToken = trimmedString(body.agentSessionToken);
+  const runId = trimmedString(body.runId);
   const agentMode = parseAgentMode(body.agentMode);
   const repoValidation = validateRepoUrl(body.repoUrl);
-  const branchValidation = validateBranch(body.branch?.trim() || DEFAULT_BRANCH);
+  const branchValidation = validateBranch(trimmedString(body.branch) || DEFAULT_BRANCH);
   const model = normalizeModelSelection(body.model, body.modelId);
 
   if (!apiKey || !agentId || !runId) {
@@ -57,16 +52,9 @@ export async function POST(request: Request) {
   const repoUrl = repoValidation.value.url;
   const branch = branchValidation.value;
   const modelId = model.id;
-  const policy = validateAgentPolicy({
-    agentMode,
-    repoUrl,
-    branch,
-    isFollowUp: true
-  });
-  if (!policy.allowed) {
-    return NextResponse.json({ error: policy.error }, { status: policy.status });
-  }
-
+  // No Implement-mode policy re-check here: the signed session token already
+  // binds this agent to its repo, branch, mode, and model, and stopping a run
+  // must keep working even if policy changes mid-run.
   const session = verifyAgentSessionToken(agentSessionToken, {
     agentId,
     apiKey,

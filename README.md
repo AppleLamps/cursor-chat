@@ -82,23 +82,26 @@ When they are unset the app behaves exactly as before.
 
 | Mode | Intended use | Behavior |
 | --- | --- | --- |
-| **Ask** | Understand a codebase | Read-only investigation and explanation |
-| **Plan** | Design a safe change | Read-only investigation and an implementation-ready plan |
+| **Ask** | Understand a codebase | Read-only by instruction (system prompt only) |
+| **Plan** | Design a safe change | Read-only by instruction, run in the SDK's `plan` mode |
 | **Implement** | Complete a scoped task | May edit code, commit changes, and open a pull request |
 
 The selected mode is fixed after the first message. Start a new conversation to
 switch modes.
 
-Ask and Plan are enforced through mode-specific system prompts and Cursor SDK
-settings. For a stronger repository-level boundary, install the example
-[read-only Cursor hooks](docs/hooks.example.json) in each target repository.
-Prompt instructions alone are not a hard security boundary.
+Ask is enforced only through its system prompt; Plan adds the SDK's `plan`
+mode. The Cursor SDK has no hard read-only switch for cloud agents, so neither
+is a security boundary, and a prompt-injected repository could still try to make
+an Ask run write. For a real boundary, install the example
+[read-only Cursor hooks](docs/hooks.example.json) in each target repository, or
+use a Cursor key and GitHub integration that cannot write to it.
 
 Implement mode is intentionally privileged:
 
 - The user must explicitly confirm the first write-capable run.
 - Protected branches are denied by default, including `main`, `master`,
-  `production`, `release/*`, and `hotfix/*`.
+  `production`, `release/*`, and `hotfix/*`. `refs/heads/main` is treated as
+  `main`.
 - Deployments can disable the mode or restrict allowed owners, repositories, and
   branches.
 - Follow-up requests require a signed session token bound to the API key,
@@ -178,11 +181,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | Variable | Purpose |
 | --- | --- |
 | `ASKCURSOR_MAX_ACTIVE_CHAT_STREAMS` | Maximum concurrent chat streams; defaults to `50` |
+| `ASKCURSOR_MAX_ACTIVE_STREAMS_PER_USER` | Maximum concurrent streams per Cursor key; defaults to `3` |
+| `ASKCURSOR_TRUSTED_IP_HEADER` | Header carrying the real client IP behind your proxy (for example `x-real-ip`); unset uses `x-forwarded-for` |
+| `ASKCURSOR_GITHUB_OAUTH_SCOPE` | `repo` (default) or `public_repo` for the Connect GitHub flow |
 | `ASKCURSOR_ENABLE_IMPLEMENT_MODE` | Set to `false` to disable Implement mode |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_OWNERS` | Comma-separated owner allowlist |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_REPOS` | Comma-separated repository allowlist |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES` | Comma-separated branch allowlist |
-| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Override the default protected-branch patterns |
+| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Extra protected-branch patterns, added to the defaults |
 | `ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES` | Set to `true` to permit protected branches |
 
 Allowlist values support `*` wildcards. See [.env.example](.env.example) for

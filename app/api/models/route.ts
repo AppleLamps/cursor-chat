@@ -1,8 +1,8 @@
-import { CursorAgentError } from "@cursor/sdk";
 import { NextResponse } from "next/server";
 import {
   getFallbackModelCatalog,
-  getModelCatalog
+  getModelCatalog,
+  isAuthFailure
 } from "@/lib/model-catalog";
 import {
   bodyTooLargeResponse,
@@ -11,6 +11,7 @@ import {
   readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
+import { trimmedString } from "@/lib/validate";
 
 type ModelsRequest = { apiKey?: string };
 
@@ -31,7 +32,7 @@ export async function POST(request: Request) {
 
   const parsed = await readJsonBody<ModelsRequest>(request);
   if (!parsed.ok) return parsed.response;
-  const apiKey = parsed.body.apiKey?.trim();
+  const apiKey = trimmedString(parsed.body.apiKey);
   if (!apiKey) {
     return NextResponse.json(
       { error: "API key is required." },
@@ -44,13 +45,13 @@ export async function POST(request: Request) {
       headers: PRIVATE_RESPONSE_HEADERS
     });
   } catch (error) {
-    if (
-      error instanceof CursorAgentError &&
-      (error.status === 401 || error.status === 403)
-    ) {
+    if (isAuthFailure(error)) {
       return NextResponse.json(
-        { error: error.message },
-        { status: error.status, headers: PRIVATE_RESPONSE_HEADERS }
+        { error: error instanceof Error ? error.message : "Cursor rejected the API key." },
+        {
+          status: (error as { status: number }).status,
+          headers: PRIVATE_RESPONSE_HEADERS
+        }
       );
     }
 

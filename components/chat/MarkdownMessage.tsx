@@ -116,6 +116,16 @@ export default function MarkdownMessage({
               {children}
             </a>
           ),
+          // Remote images in model output would be fetched automatically and
+          // can carry data out in the URL, so they render as plain links.
+          img: ({ src, alt }) =>
+            typeof src === "string" && /^https?:\/\//i.test(src) ? (
+              <a href={src} target="_blank" rel="noreferrer noopener">
+                {alt ? `Image: ${alt}` : "Image link"}
+              </a>
+            ) : (
+              <span>{alt ? `Image: ${alt}` : "Image"}</span>
+            ),
           pre: ({ children }) => <>{children}</>,
           code: ({ className, children, ...props }) => {
             const code = String(children).replace(/\n$/, "");

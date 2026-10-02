@@ -25,11 +25,13 @@ export type ModelCatalog = {
 };
 
 const CACHE_TTL_MS = 60_000;
+/** A failed lookup is remembered briefly so a bad key cannot hammer Cursor. */
+const FAILURE_TTL_MS = 15_000;
 const MAX_CACHE_ENTRIES = 100;
-const catalogCache = new Map<
-  string,
-  { expiresAt: number; value: ModelCatalog }
->();
+type CacheEntry =
+  | { expiresAt: number; value: ModelCatalog }
+  | { expiresAt: number; error: unknown };
+const catalogCache = new Map<string, CacheEntry>();
 
 function normalizeParams(value: unknown): ModelParameterValue[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -190,7 +192,7 @@ function cacheKey(apiKey: string) {
   return createHash("sha256").update(apiKey.trim()).digest("base64url");
 }
 
-function putCache(key: string, value: ModelCatalog) {
+function putCache(key: string, entry: Omit<CacheEntry, "expiresAt">, ttlMs: number) {
   const now = Date.now();
   for (const [candidate, entry] of catalogCache) {
     if (entry.expiresAt <= now) catalogCache.delete(candidate);
@@ -200,21 +202,39 @@ function putCache(key: string, value: ModelCatalog) {
     if (!oldest) break;
     catalogCache.delete(oldest);
   }
-  catalogCache.set(key, { expiresAt: now + CACHE_TTL_MS, value });
+  catalogCache.set(key, { ...entry, expiresAt: now + ttlMs } as CacheEntry);
 }
 
 export async function getModelCatalog(apiKey: string): Promise<ModelCatalog> {
   const key = cacheKey(apiKey);
   const cached = catalogCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached && cached.expiresAt > Date.now()) {
+    if ("error" in cached) throw cached.error;
+    return cached.value;
+  }
   if (cached) catalogCache.delete(key);
 
-  const models = (await Cursor.models.list({ apiKey }))
+  let list;
+  try {
+    list = await Cursor.models.list({ apiKey });
+  } catch (error) {
+    putCache(key, { error }, FAILURE_TTL_MS);
+    throw error;
+  }
+
+  const models = list
     .map(normalizeCatalogModel)
     .filter((model): model is CatalogModel => model !== null);
   const value = models.length > 0 ? { models, fallback: false } : fallbackCatalog();
-  putCache(key, value);
+  putCache(key, { value }, CACHE_TTL_MS);
   return value;
+}
+
+/** True when Cursor rejected the API key (401/403) rather than failing to answer. */
+export function isAuthFailure(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { status?: unknown }).status;
+  return status === 401 || status === 403;
 }
 
 export function getFallbackModelCatalog() {

@@ -36,4 +36,39 @@ describe("validateAgentPolicy", () => {
       status: 428
     });
   });
+
+  const implement = (branch: string) =>
+    validateAgentPolicy({
+      agentMode: "implement",
+      repoUrl: "https://github.com/acme/app",
+      branch,
+      isFollowUp: true
+    });
+
+  it.each(["main", "MAIN", "refs/heads/main", "heads/main", "refs/heads/release/1.2"])(
+    "blocks protected branch spelling %s",
+    (branch) => {
+      expect(implement(branch)).toMatchObject({ allowed: false, status: 403 });
+    }
+  );
+
+  it("allows ordinary feature branches", () => {
+    expect(implement("feature/x")).toEqual({ allowed: true });
+    expect(implement("refs/heads/feature/x")).toEqual({ allowed: true });
+  });
+
+  it("adds configured protected branches to the defaults instead of replacing them", () => {
+    process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES = "staging";
+
+    expect(implement("staging")).toMatchObject({ allowed: false });
+    expect(implement("main")).toMatchObject({ allowed: false });
+    expect(implement("feature/x")).toEqual({ allowed: true });
+  });
+
+  it("applies the branch allowlist to the short name", () => {
+    process.env.ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES = "feature/*";
+
+    expect(implement("refs/heads/feature/x")).toEqual({ allowed: true });
+    expect(implement("bugfix/x")).toMatchObject({ allowed: false });
+  });
 });

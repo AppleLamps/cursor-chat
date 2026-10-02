@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -37,9 +38,12 @@ export const viewport: Viewport = {
   themeColor: "#ffffff"
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
+  // Render per request so Next can stamp the CSP nonce from proxy.ts on its scripts.
+  await connection();
+
   return (
     <html lang="en" className="font-sans">
       <body>{children}</body>
