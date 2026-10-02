@@ -77,7 +77,7 @@ export default function ChatHeader({
 
   return (
     <>
-      <header className="border-b border-border bg-background pt-[env(safe-area-inset-top)] md:hidden">
+      <header className="border-b border-border bg-background pt-[env(safe-area-inset-top)] lg:hidden">
         <div className="flex h-14 items-center gap-1 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]">
           <Button
             type="button"
@@ -91,10 +91,10 @@ export default function ChatHeader({
           <button
             type="button"
             onClick={onChangeRepo}
-            className="flex h-11 min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 text-left font-mono font-medium text-foreground transition active:bg-muted"
+            className="flex h-11 min-w-0 shrink items-center gap-1.5 rounded-lg px-2 text-left font-mono font-medium text-foreground transition active:bg-muted"
             aria-label={`Change repository: ${repoLabel}`}
           >
-            <span className="min-w-0 flex-1">
+            <span className="min-w-0 text-left">
               <span className="block truncate text-[13px] leading-4">{repoName}</span>
               {repoBranch ? (
                 <span className="block truncate text-[11px] font-normal leading-4 text-muted-foreground">
@@ -104,6 +104,7 @@ export default function ChatHeader({
             </span>
             <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </button>
+          <div className="min-w-0 flex-1" aria-hidden="true" />
           {!canChangeAgentMode ? lockedModeBadge : null}
           <Button
             type="button"
@@ -134,7 +135,7 @@ export default function ChatHeader({
         ) : null}
       </header>
 
-      <header className="hidden h-[calc(3.5rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-background pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] md:flex">
+      <header className="hidden h-[calc(3.5rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-background pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] lg:flex">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {!sidebarOpen ? (
             <>
@@ -182,61 +183,44 @@ export default function ChatHeader({
               New chat
             </Button>
           ) : null}
-          {/* Narrower than lg (tablets, landscape phones) the actions fold into a menu. */}
-          <div className="lg:hidden">
-            <ActionsMenu
-              triggerClassName="size-8"
-              canShare={canShare}
-              shareStatus={shareStatus}
-              onShare={onShare}
-              prUrl={undefined}
-              canManageCloudAgent={canManageCloudAgent}
-              cloudAgentArchived={cloudAgentArchived}
-              lifecycleBusy={lifecycleBusy}
-              onToggleCloudArchive={onToggleCloudArchive}
-              onDeleteCloudAgent={onDeleteCloudAgent}
-            />
-          </div>
-          <div className="hidden items-center gap-2 lg:flex">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onShare}
-              disabled={!canShare}
-              title={shareStatus || "Share conversation"}
-            >
-              {shareStatus || "Share"}
-            </Button>
-            {canManageCloudAgent ? (
-              <>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={onToggleCloudArchive}
-                  disabled={lifecycleBusy}
-                  title={
-                    cloudAgentArchived
-                      ? "Restore this Cursor cloud agent"
-                      : "Archive this Cursor cloud agent"
-                  }
-                >
-                  {cloudAgentArchived ? "Unarchive agent" : "Archive agent"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  onClick={onDeleteCloudAgent}
-                  disabled={lifecycleBusy}
-                  title="Permanently delete this Cursor cloud agent (does not delete the local chat)"
-                >
-                  Delete cloud agent
-                </Button>
-              </>
-            ) : null}
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onShare}
+            disabled={!canShare}
+            title={shareStatus || "Share conversation"}
+          >
+            {shareStatus || "Share"}
+          </Button>
+          {canManageCloudAgent ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onToggleCloudArchive}
+                disabled={lifecycleBusy}
+                title={
+                  cloudAgentArchived
+                    ? "Restore this Cursor cloud agent"
+                    : "Archive this Cursor cloud agent"
+                }
+              >
+                {cloudAgentArchived ? "Unarchive agent" : "Archive agent"}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={onDeleteCloudAgent}
+                disabled={lifecycleBusy}
+                title="Permanently delete this Cursor cloud agent (does not delete the local chat)"
+              >
+                Delete cloud agent
+              </Button>
+            </>
+          ) : null}
         </div>
       </header>
     </>

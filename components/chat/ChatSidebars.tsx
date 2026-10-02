@@ -53,7 +53,7 @@ export default function ChatSidebars({
   return (
     <>
       {mobileSidebarOpen ? (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-40 lg:hidden">
           <button
             aria-label="Close sidebar"
             className="absolute inset-0 bg-black/25"
@@ -84,7 +84,7 @@ export default function ChatSidebars({
       ) : null}
 
       {sidebarOpen ? (
-        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-[#e8e8e8] bg-[#f9f9f9] md:flex">
+        <aside className="hidden w-[260px] shrink-0 flex-col border-r border-[#e8e8e8] bg-[#f9f9f9] lg:flex">
           <SidebarPanel
             conversations={conversations}
             activeConversationId={activeConversationId}
