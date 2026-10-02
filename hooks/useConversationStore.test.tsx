@@ -188,4 +188,51 @@ describe("deleting and restoring", () => {
     expect(result.current.conversations.some((c) => c.id === "a")).toBe(true);
     expect(result.current.activeConversationId).toBe("a");
   });
+
+  describe("export and import", () => {
+    it("exports without agent links and imports back, reviving a chat deleted here", async () => {
+      seed([
+        {
+          ...chat("keep", [reply({ id: "m1", role: "user", content: "hi" })]),
+          agentId: "agent-1",
+          agentSessionToken: "tok"
+        }
+      ]);
+      const { result } = await hydrated();
+
+      const exported = result.current.exportHistory();
+      expect(JSON.stringify(exported)).not.toContain("agent-1");
+      expect(exported.conversations).toHaveLength(1);
+
+      act(() => result.current.deleteConversation("keep"));
+      expect(result.current.conversations).toHaveLength(0);
+
+      let plan: ReturnType<typeof result.current.importHistory> | undefined;
+      act(() => {
+        plan = result.current.importHistory(exported.conversations);
+      });
+
+      expect(plan).toMatchObject({ added: 1, updated: 0, unchanged: 0 });
+      expect(result.current.conversations.map((c) => c.id)).toEqual(["keep"]);
+
+      // The revived chat must survive the next save and cross-tab merge.
+      await waitFor(() => {
+        const saved = JSON.parse(window.localStorage.getItem(KEY) ?? "{}");
+        expect(saved.tombstones).not.toHaveProperty("keep");
+        expect(saved.conversations).toHaveLength(1);
+      });
+    });
+
+    it("leaves chats alone when the import is not newer", async () => {
+      seed([chat("same")]);
+      const { result } = await hydrated();
+
+      let plan: ReturnType<typeof result.current.importHistory> | undefined;
+      act(() => {
+        plan = result.current.importHistory(result.current.exportHistory().conversations);
+      });
+
+      expect(plan).toMatchObject({ added: 0, updated: 0, unchanged: 1 });
+    });
+  });
 });

@@ -122,7 +122,11 @@ access.
 - GitHub source links for files inspected by the agent
 - Pull request links returned by successful Implement runs
 - PNG, JPEG, WebP, and GIF attachments, up to five images per message
-- Local conversation history with rename, delete, and cross-tab synchronization
+- Local conversation history with rename, delete, undo delete, search across
+  titles and message text, and cross-tab synchronization
+- Chat export and import (Settings): a JSON file with your questions, answers
+  and attached images, but never keys or cloud agent links. Import adds new
+  chats and takes an imported copy only when it is newer
 - Per-response duration, model, request ID, and token usage when reported by
   Cursor
 

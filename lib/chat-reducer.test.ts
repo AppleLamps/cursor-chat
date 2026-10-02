@@ -284,4 +284,19 @@ describe("change-repo", () => {
 
     expect(next.conversations[0].agentId).toBeUndefined();
   });
+
+  it("imports chats by id without disturbing the active one", () => {
+    const base = state();
+    const existing = base.conversations[0];
+    const incoming = [
+      { ...existing, title: "Imported copy", updatedAt: "2099-01-01T00:00:00.000Z" },
+      { ...createConversation("https://github.com/acme/other"), id: "brand-new" }
+    ];
+
+    const next = conversationReducer(base, { type: "import", conversations: incoming });
+
+    expect(next.activeConversationId).toBe("chat");
+    expect(next.conversations.map((c) => c.id).sort()).toEqual(["brand-new", "chat"]);
+    expect(next.conversations.find((c) => c.id === "chat")?.title).toBe("Imported copy");
+  });
 });
