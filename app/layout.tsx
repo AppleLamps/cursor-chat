@@ -1,5 +1,20 @@
 import type { Metadata, Viewport } from "next";
+import { Manrope, Newsreader } from "next/font/google";
 import "./globals.css";
+
+// Self-hosted by next/font at build time: no request to Google at runtime, and
+// the font files are served from this origin (the CSP allows font-src 'self').
+const sans = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap"
+});
+const display = Newsreader({
+  subsets: ["latin"],
+  axes: ["opsz"],
+  variable: "--font-display",
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://askcursor.app"),
@@ -41,7 +56,7 @@ export default function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="font-sans">
+    <html lang="en" className={`${sans.variable} ${display.variable} font-sans`}>
       <body>{children}</body>
     </html>
   );
