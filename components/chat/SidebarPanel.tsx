@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useRef, useState } from "react";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import SidebarRecents from "@/components/SidebarRecents";
 import type { Conversation } from "@/lib/chat-types";
 import { APP_NAME } from "@/lib/defaults";
@@ -47,6 +48,11 @@ export default function SidebarPanel({
   const [githubInput, setGithubInput] = useState("");
   const [githubError, setGithubError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsDialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(settingsDialogRef, {
+    active: settingsOpen,
+    onClose: () => setSettingsOpen(false)
+  });
 
   function handleSaveGitHub(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -119,10 +125,12 @@ export default function SidebarPanel({
           <button
             type="button"
             aria-label="Close settings"
+            tabIndex={-1}
             className="absolute inset-0 bg-black/25"
             onClick={() => setSettingsOpen(false)}
           />
           <div
+            ref={settingsDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
