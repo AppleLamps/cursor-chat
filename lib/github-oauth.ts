@@ -4,8 +4,18 @@ export const GITHUB_OAUTH_STATE_COOKIE = "askcursor_gh_oauth_state";
 export const GITHUB_OAUTH_STATE_TTL_SECONDS = 10 * 60;
 export const GITHUB_OAUTH_CALLBACK_PATH = "/api/auth/github/callback";
 
-/** `repo` is the narrowest OAuth App scope that can read private repo branches. */
-export const GITHUB_OAUTH_SCOPE = "repo";
+/**
+ * `repo` is the narrowest OAuth App scope that can read private repo branches,
+ * but it also grants write access. Deployments that only need public
+ * repositories can set ASKCURSOR_GITHUB_OAUTH_SCOPE=public_repo. Any other
+ * value falls back to `repo`.
+ */
+const ALLOWED_OAUTH_SCOPES = ["repo", "public_repo"] as const;
+
+export function getGitHubOAuthScope(): (typeof ALLOWED_OAUTH_SCOPES)[number] {
+  const configured = process.env.ASKCURSOR_GITHUB_OAUTH_SCOPE?.trim();
+  return ALLOWED_OAUTH_SCOPES.find((scope) => scope === configured) ?? "repo";
+}
 
 export type GitHubOAuthConfig = {
   clientId: string;
@@ -35,7 +45,7 @@ export function statesMatch(expected: string | undefined, actual: string | null)
 export function buildGitHubAuthorizeUrl(clientId: string, state: string) {
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", clientId);
-  url.searchParams.set("scope", GITHUB_OAUTH_SCOPE);
+  url.searchParams.set("scope", getGitHubOAuthScope());
   url.searchParams.set("state", state);
   url.searchParams.set("allow_signup", "false");
   return url.toString();

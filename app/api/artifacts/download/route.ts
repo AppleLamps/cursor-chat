@@ -8,11 +8,10 @@ import {
   normalizeArtifactPath,
   type ArtifactRequest
 } from "@/lib/artifact-api";
-import { MAX_CHAT_BODY_BYTES } from "@/lib/chat-images";
-import { readJsonBody } from "@/lib/rate-limit";
+import { readControlBody } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
-  const parsed = await readJsonBody<ArtifactRequest>(request, MAX_CHAT_BODY_BYTES);
+  const parsed = await readControlBody<ArtifactRequest>(request);
   if (!parsed.ok) return parsed.response;
   const authorized = authorizeArtifactRequest(parsed.body);
   if (!authorized.ok) return authorized.response;

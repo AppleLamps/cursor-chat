@@ -123,3 +123,11 @@ export function validateBranch(value: string | undefined): BranchValidation {
 
   return { ok: true, value: branch };
 }
+
+/**
+ * Reads a request-body field that should be text. Anything else (a number, an
+ * object, null) is treated as absent rather than throwing on `.trim()`.
+ */
+export function trimmedString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() : undefined;
+}

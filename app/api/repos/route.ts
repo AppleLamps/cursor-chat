@@ -7,6 +7,7 @@ import {
   readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
+import { trimmedString } from "@/lib/validate";
 
 type ReposRequest = {
   apiKey?: string;
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
 
   const body = parsedBody.body;
 
-  const apiKey = body.apiKey?.trim();
+  const apiKey = trimmedString(body.apiKey);
 
   if (!apiKey) {
     return NextResponse.json({ error: "API key is required." }, { status: 400 });
