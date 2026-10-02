@@ -19,6 +19,8 @@ export default function SidebarPanel({
   onSignOut,
   onClearGitHubToken,
   onSaveGitHubToken,
+  onConnectGitHub,
+  githubConnectError,
   defaultRepoLabel,
   onCollapse,
   collapseLabel
@@ -35,6 +37,8 @@ export default function SidebarPanel({
   onSignOut: () => void;
   onClearGitHubToken: () => void;
   onSaveGitHubToken: (token: string) => boolean;
+  onConnectGitHub?: () => void;
+  githubConnectError?: string | null;
   defaultRepoLabel?: string | null;
   onCollapse: () => void;
   collapseLabel: string;
@@ -169,7 +173,7 @@ export default function SidebarPanel({
                     <IconGitHub />
                   </SidebarIcon>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs text-[#8a8a8a]">GitHub token</p>
+                    <p className="text-xs text-[#8a8a8a]">GitHub</p>
                     {githubToken ? (
                       <p
                         className="mt-0.5 truncate font-mono text-sm text-[#303030]"
@@ -185,7 +189,7 @@ export default function SidebarPanel({
 
                 {githubToken ? (
                   <SettingsAction
-                    label="Clear GitHub token"
+                    label="Disconnect GitHub"
                     icon={<IconKeyOff />}
                     onClick={onClearGitHubToken}
                   />
@@ -222,11 +226,31 @@ export default function SidebarPanel({
                     </div>
                   </form>
                 ) : (
-                  <SettingsAction
-                    label="Add GitHub token"
-                    icon={<IconGitHub className="h-4 w-4" />}
-                    onClick={() => setShowGitHubForm(true)}
-                  />
+                  <>
+                    {githubConnectError ? (
+                      <p className="mt-2 text-xs text-red-700">{githubConnectError}</p>
+                    ) : null}
+                    {onConnectGitHub ? (
+                      <>
+                        <SettingsAction
+                          label="Connect GitHub"
+                          icon={<IconGitHub className="h-4 w-4" />}
+                          onClick={onConnectGitHub}
+                        />
+                        <SettingsAction
+                          label="Use a token instead"
+                          icon={<IconKey />}
+                          onClick={() => setShowGitHubForm(true)}
+                        />
+                      </>
+                    ) : (
+                      <SettingsAction
+                        label="Add GitHub token"
+                        icon={<IconGitHub className="h-4 w-4" />}
+                        onClick={() => setShowGitHubForm(true)}
+                      />
+                    )}
+                  </>
                 )}
               </div>
 

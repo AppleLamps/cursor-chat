@@ -10,9 +10,19 @@ type OnboardingProps = {
     githubToken?: string;
     remember: boolean;
   }) => void;
+  /** Token already obtained through the GitHub connect flow. */
+  githubToken?: string | null;
+  githubError?: string | null;
+  /** When provided, a "Connect GitHub" button replaces pasting a token. */
+  onConnectGitHub?: (pending: { apiKey?: string; remember: boolean }) => void;
 };
 
-export default function Onboarding({ onComplete }: OnboardingProps) {
+export default function Onboarding({
+  onComplete,
+  githubToken: connectedGitHubToken,
+  githubError,
+  onConnectGitHub
+}: OnboardingProps) {
   const [apiKey, setApiKey] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [remember, setRemember] = useState(false);
@@ -37,7 +47,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
     onComplete({
       apiKey: trimmedKey,
-      githubToken: trimmedGitHub || undefined,
+      githubToken: trimmedGitHub || connectedGitHubToken || undefined,
       remember
     });
   }
@@ -77,46 +87,49 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           />
 
           <div className="mt-5 rounded-xl border border-[#ececec] bg-[#fafafa] p-4">
-            <label
-              htmlFor="github-token"
-              className="block text-sm font-medium text-[#333]"
-            >
-              GitHub token{" "}
-              <span className="font-normal text-[#8a8a8a]">(optional)</span>
-            </label>
-            <input
-              id="github-token"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={githubToken}
-              onChange={(event) => setGithubToken(event.target.value)}
-              placeholder="ghp_… or github_pat_…"
-              className="mt-2 w-full rounded-xl border border-[#d9d9d9] bg-white px-4 py-3 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
-            />
-            <p className="mt-3 text-xs leading-5 text-[#5f6368]">
+            <p className="text-sm font-medium text-[#333]">
+              GitHub <span className="font-normal text-[#8a8a8a]">(optional)</span>
+            </p>
+            <p className="mt-1 text-xs leading-5 text-[#5f6368]">
               Adds a real branch picker when you choose a repository. Without it,
               you can still type common branch names manually.
             </p>
-            <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-xs leading-5 text-[#5f6368]">
-              <li>
-                Open{" "}
-                <a
-                  href="https://github.com/settings/tokens/new?scopes=repo&description=AskCursor"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-[#444] underline underline-offset-2 hover:text-[#111]"
-                >
-                  GitHub token settings
-                </a>
-              </li>
-              <li>Create a classic token with the <strong>repo</strong> scope</li>
-              <li>Paste the token here and continue</li>
-            </ol>
-            <p className="mt-3 text-xs leading-5 text-[#8a8a8a]">
-              Used only to list branches. Sent to this app&apos;s server, then to
-              GitHub. Never stored on the server.
-            </p>
+
+            {githubError ? (
+              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-950">
+                {githubError}
+              </p>
+            ) : null}
+
+            {connectedGitHubToken ? (
+              <p className="mt-3 text-sm font-medium text-[#1a7f37]">
+                ✓ GitHub connected
+              </p>
+            ) : onConnectGitHub ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onConnectGitHub({
+                    apiKey: apiKey.trim() || undefined,
+                    remember
+                  })
+                }
+                className="mt-3 flex w-full items-center justify-center rounded-full border border-[#d9d9d9] bg-white px-4 py-2.5 text-sm font-semibold text-[#202123] transition hover:bg-[#f7f7f8] focus:outline-none focus:ring-4 focus:ring-black/10"
+              >
+                Connect GitHub
+              </button>
+            ) : null}
+
+            {connectedGitHubToken ? null : onConnectGitHub ? (
+              <details className="mt-3 text-xs leading-5 text-[#5f6368]">
+                <summary className="cursor-pointer font-medium text-[#444]">
+                  Paste a token instead
+                </summary>
+                <GitHubTokenField value={githubToken} onChange={setGithubToken} />
+              </details>
+            ) : (
+              <GitHubTokenField value={githubToken} onChange={setGithubToken} />
+            )}
           </div>
 
           <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm text-[#444]">
@@ -162,5 +175,52 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         </p>
       </div>
     </main>
+  );
+}
+
+function GitHubTokenField({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-3">
+      <label htmlFor="github-token" className="block text-sm font-medium text-[#333]">
+        GitHub token
+      </label>
+      <input
+        id="github-token"
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="ghp_… or github_pat_…"
+        className="mt-2 w-full rounded-xl border border-[#d9d9d9] bg-white px-4 py-3 text-sm text-[#0d0d0d] outline-none transition focus:border-[#bdbdbd] focus:ring-2 focus:ring-[#ececec]"
+      />
+      <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-xs leading-5 text-[#5f6368]">
+        <li>
+          Open{" "}
+          <a
+            href="https://github.com/settings/tokens/new?scopes=repo&description=AskCursor"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-[#444] underline underline-offset-2 hover:text-[#111]"
+          >
+            GitHub token settings
+          </a>
+        </li>
+        <li>
+          Create a classic token with the <strong>repo</strong> scope
+        </li>
+        <li>Paste the token here and continue</li>
+      </ol>
+      <p className="mt-3 text-xs leading-5 text-[#8a8a8a]">
+        Used only to list branches. Sent to this app&apos;s server, then to
+        GitHub. Never stored on the server.
+      </p>
+    </div>
   );
 }

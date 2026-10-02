@@ -23,7 +23,9 @@ export default function ChatSidebars({
   onDeleteConversation,
   onSignOut,
   onClearGitHubToken,
-  onSaveGitHubToken
+  onSaveGitHubToken,
+  onConnectGitHub,
+  githubConnectError
 }: {
   conversations: Conversation[];
   activeConversationId: string;
@@ -45,6 +47,8 @@ export default function ChatSidebars({
   onSignOut: () => void;
   onClearGitHubToken: () => void;
   onSaveGitHubToken: (token: string) => boolean;
+  onConnectGitHub?: () => void;
+  githubConnectError?: string | null;
 }) {
   return (
     <>
@@ -69,6 +73,8 @@ export default function ChatSidebars({
               onSignOut={onSignOut}
               onClearGitHubToken={onClearGitHubToken}
               onSaveGitHubToken={onSaveGitHubToken}
+              onConnectGitHub={onConnectGitHub}
+              githubConnectError={githubConnectError}
               defaultRepoLabel={defaultRepoLabel}
               onCollapse={onCloseMobileSidebar}
               collapseLabel="Close sidebar"
@@ -92,6 +98,8 @@ export default function ChatSidebars({
             onSignOut={onSignOut}
             onClearGitHubToken={onClearGitHubToken}
             onSaveGitHubToken={onSaveGitHubToken}
+            onConnectGitHub={onConnectGitHub}
+            githubConnectError={githubConnectError}
             defaultRepoLabel={defaultRepoLabel}
             onCollapse={onCollapseSidebar}
             collapseLabel="Collapse sidebar"

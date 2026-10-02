@@ -38,7 +38,13 @@ Recommended controls for environments that enable these tools:
 
 ## Credential Handling
 
-- Cursor API keys and GitHub tokens are entered by the user in the browser.
+- Cursor API keys are entered by the user in the browser. GitHub tokens are
+  either pasted or obtained through the optional "Connect GitHub" OAuth flow.
+- The OAuth flow requests the `repo` scope (needed to list branches of private
+  repositories). The client secret stays on the server; the access token is
+  returned to the browser in the URL fragment so it is not logged, and is then
+  stored exactly like a pasted token. A one-time `state` cookie guards against
+  CSRF. Users can revoke access at https://github.com/settings/applications.
 - Optional "remember on this device" storage uses browser `localStorage`.
 - The server does not persist user API keys.
 - Hosting and observability systems should avoid logging request bodies because

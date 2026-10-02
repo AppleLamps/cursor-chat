@@ -50,9 +50,23 @@ Open [http://localhost:3000](http://localhost:3000), enter your Cursor API key,
 and choose a repository. The included `.env.example` works as documentation;
 local development does not require Redis or a server-side Cursor key.
 
-To enable the branch picker, users may also provide a GitHub personal access
-token. The token is sent only to the branch-listing endpoint and is not
-forwarded to Cursor.
+To enable the branch picker, users may also connect GitHub. The token is sent
+only to the branch-listing endpoint and is not forwarded to Cursor.
+
+#### "Connect GitHub" button (optional)
+
+Cursor only issues API keys from its dashboard (there is no OAuth flow for
+third-party apps), so the Cursor key is always pasted. GitHub does support
+OAuth, so a deployment can offer a **Connect GitHub** button instead of asking
+users to create a personal access token:
+
+1. Create a [GitHub OAuth App](https://github.com/settings/developers) with the
+   authorization callback URL `https://<your-host>/api/auth/github/callback`
+   (`http://localhost:3000/api/auth/github/callback` for local development).
+2. Set `ASKCURSOR_GITHUB_CLIENT_ID` and `ASKCURSOR_GITHUB_CLIENT_SECRET`.
+
+When both are set the button appears; users can still paste a token instead.
+When they are unset the app behaves exactly as before.
 
 ### Available commands
 
