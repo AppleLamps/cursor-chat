@@ -20,5 +20,7 @@ export function parseGitHubOAuthHash(hash: string): GitHubOAuthHashResult | null
 }
 
 export function startGitHubOAuth() {
+  // A server route (it redirects to GitHub), not a Next.js page.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
   window.location.assign(GITHUB_OAUTH_START_PATH);
 }
