@@ -59,6 +59,14 @@ function repoSlug(value: string) {
   }
 }
 
+/**
+ * Git accepts `refs/heads/main` and `heads/main` for `main`, so policy checks
+ * compare against the short name or a prefixed spelling would slip past them.
+ */
+export function shortBranchName(branch: string) {
+  return branch.trim().replace(/^(?:refs\/)?heads\//i, "");
+}
+
 function wildcardMatch(pattern: string, value: string) {
   const escaped = pattern
     .trim()
@@ -97,7 +105,10 @@ function isRepoAllowed(repoUrl: string) {
 function isBranchAllowed(branch: string) {
   const allowedBranches = parseList(process.env.ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES);
 
-  return allowedBranches.length === 0 || matchesAny(allowedBranches, branch.trim());
+  return (
+    allowedBranches.length === 0 ||
+    matchesAny(allowedBranches, shortBranchName(branch))
+  );
 }
 
 function isProtectedBranch(branch: string) {
@@ -105,12 +116,14 @@ function isProtectedBranch(branch: string) {
     return false;
   }
 
-  const protectedBranches =
-    parseList(process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES).length > 0
-      ? parseList(process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES)
-      : DEFAULT_PROTECTED_BRANCHES;
+  // The env list adds to the defaults: replacing them would let a deployment
+  // that only wants to protect `staging` accidentally unprotect `main`.
+  const protectedBranches = [
+    ...DEFAULT_PROTECTED_BRANCHES,
+    ...parseList(process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES)
+  ];
 
-  return matchesAny(protectedBranches, branch.trim());
+  return matchesAny(protectedBranches, shortBranchName(branch));
 }
 
 export function validateAgentPolicy({

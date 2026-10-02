@@ -219,3 +219,69 @@ describe("conversationReducer", () => {
     );
   });
 });
+
+describe("change-repo", () => {
+  function withAgent(): ConversationState {
+    const base = state();
+    return {
+      ...base,
+      conversations: base.conversations.map((conversation) => ({
+        ...conversation,
+        agentId: "agent-1",
+        agentSessionToken: "token-1",
+        branch: "feature/x"
+      }))
+    };
+  }
+
+  it("keeps the cloud agent when nothing actually changed", () => {
+    const current = withAgent();
+    const conversation = current.conversations[0];
+
+    const next = conversationReducer(current, {
+      type: "change-repo",
+      id: conversation.id,
+      repoUrl: conversation.repoUrl!,
+      branch: "feature/x",
+      modelId: conversation.modelId!,
+      model: conversation.model
+    });
+
+    expect(next).toBe(current);
+    expect(next.conversations[0].agentId).toBe("agent-1");
+  });
+
+  it("starts a fresh agent when the branch changes", () => {
+    const current = withAgent();
+    const conversation = current.conversations[0];
+
+    const next = conversationReducer(current, {
+      type: "change-repo",
+      id: conversation.id,
+      repoUrl: conversation.repoUrl!,
+      branch: "main",
+      modelId: conversation.modelId!,
+      model: conversation.model
+    });
+
+    expect(next.conversations[0].branch).toBe("main");
+    expect(next.conversations[0].agentId).toBeUndefined();
+    expect(next.conversations[0].agentSessionToken).toBeUndefined();
+  });
+
+  it("starts a fresh agent when the model changes", () => {
+    const current = withAgent();
+    const conversation = current.conversations[0];
+
+    const next = conversationReducer(current, {
+      type: "change-repo",
+      id: conversation.id,
+      repoUrl: conversation.repoUrl!,
+      branch: "feature/x",
+      modelId: "grok-4.5",
+      model: { id: "grok-4.5" }
+    });
+
+    expect(next.conversations[0].agentId).toBeUndefined();
+  });
+});

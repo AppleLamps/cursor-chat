@@ -151,9 +151,59 @@ export function isConversation(value: unknown): value is Conversation {
   );
 }
 
-export function normalizeConversation(conversation: Conversation): Conversation {
+/** A streaming message with no heartbeat for this long is considered abandoned. */
+export const STREAM_STALE_MS = 45_000;
+
+export const INTERRUPTED_NOTE = "Run interrupted. Retry to reconnect.";
+
+function isStoredMessage(value: unknown): value is Message {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<Message>;
+  return (
+    typeof candidate.id === "string" &&
+    (candidate.role === "user" || candidate.role === "assistant") &&
+    typeof candidate.content === "string"
+  );
+}
+
+/**
+ * A reply that was streaming when the tab closed, reloaded or crashed is saved
+ * with streaming:true and would otherwise spin forever. Turn it into an error
+ * message that keeps the partial text and the run id, and mark it recoverable
+ * so Retry re-attaches to the run (which may well have finished).
+ */
+export function settleInterruptedMessage(
+  message: Message,
+  now = Date.now()
+): Message {
+  if (message.streaming !== true) return message;
+  if (message.heartbeatAt && now - message.heartbeatAt <= STREAM_STALE_MS) {
+    return message;
+  }
+
+  const partial = message.content.trim();
+
+  return {
+    ...message,
+    streaming: false,
+    error: true,
+    recoverable: Boolean(message.runId),
+    activity: undefined,
+    heartbeatAt: undefined,
+    content: partial ? `${message.content}\n\n_${INTERRUPTED_NOTE}_` : INTERRUPTED_NOTE
+  };
+}
+
+export function normalizeConversation(
+  conversation: Conversation,
+  now = Date.now()
+): Conversation {
   return {
     ...stripPrivateConversationFields(conversation),
+    // One malformed message must not make the whole history unreadable.
+    messages: conversation.messages
+      .filter(isStoredMessage)
+      .map((message) => settleInterruptedMessage(message, now)),
     agentMode: parseAgentMode(conversation.agentMode),
     modelId: resolveConversationModel(conversation).id,
     model: resolveConversationModel(conversation)
@@ -198,6 +248,7 @@ export function withPersistedMessages(
       nextAgentId === null
         ? undefined
         : nextAgentSessionToken ?? conversation.agentSessionToken,
-    agentMode: resolveConversationAgentMode(conversation)
+    agentMode: resolveConversationAgentMode(conversation),
+    agentArchived: conversation.agentArchived
   };
 }

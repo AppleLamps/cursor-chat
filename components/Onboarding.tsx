@@ -122,6 +122,15 @@ export default function Onboarding({
               </button>
             ) : null}
 
+            {!connectedGitHubToken && onConnectGitHub ? (
+              <p className="mt-2 text-xs leading-5 text-[#8a8a8a]">
+                Only used to list branches. GitHub&apos;s OAuth sign-in has no
+                read-only option for private repositories, so it asks for the{" "}
+                <strong>repo</strong> scope. To limit access, paste a
+                fine-grained token with read-only Contents access instead.
+              </p>
+            ) : null}
+
             {connectedGitHubToken ? null : onConnectGitHub ? (
               <details className="mt-3 text-xs leading-5 text-[#5f6368]">
                 <summary className="cursor-pointer font-medium text-[#444]">
@@ -217,7 +226,8 @@ function GitHubTokenField({
           </a>
         </li>
         <li>
-          Create a classic token with the <strong>repo</strong> scope
+          Create a classic token with the <strong>repo</strong> scope, or a
+          fine-grained token with read-only Contents access
         </li>
         <li>Paste the token here and continue</li>
       </ol>

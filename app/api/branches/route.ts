@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listGitHubBranches } from "@/lib/github";
+import { GitHubApiError, listGitHubBranches } from "@/lib/github";
 import {
   bodyTooLargeResponse,
   checkRateLimit,
@@ -7,7 +7,7 @@ import {
   readJsonBody,
   rateLimitedResponse
 } from "@/lib/rate-limit";
-import { validateRepoUrl } from "@/lib/validate";
+import { trimmedString, validateRepoUrl } from "@/lib/validate";
 
 type BranchesRequest = {
   repoUrl?: string;
@@ -32,8 +32,8 @@ export async function POST(request: Request) {
 
   const body = parsedBody.body;
 
-  const repoUrl = body.repoUrl?.trim();
-  const githubToken = body.githubToken?.trim();
+  const repoUrl = trimmedString(body.repoUrl);
+  const githubToken = trimmedString(body.githubToken);
 
   const repoValidation = validateRepoUrl(repoUrl);
   if (!repoValidation.ok) {
@@ -49,11 +49,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to load branches from GitHub.";
+    if (error instanceof GitHubApiError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
 
-    const status = message.toLowerCase().includes("invalid") ? 401 : 502;
-
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json(
+      { error: "Failed to load branches from GitHub." },
+      { status: 502 }
+    );
   }
 }

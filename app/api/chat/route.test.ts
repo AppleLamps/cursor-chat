@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Agent } from "@cursor/sdk";
+import { Agent, Cursor } from "@cursor/sdk";
 import { maxDuration, POST } from "@/app/api/chat/route";
 import { createAgentSessionToken } from "@/lib/agent-session";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { clearModelCatalogCacheForTests } from "@/lib/model-catalog";
+import { checkRateLimit, claimChatConcurrencySlot } from "@/lib/rate-limit";
 
 vi.mock("@cursor/sdk", () => {
   class CursorSdkError extends Error {
@@ -16,6 +17,7 @@ vi.mock("@cursor/sdk", () => {
       resume: vi.fn(),
       getRun: vi.fn()
     },
+    Cursor: { models: { list: vi.fn() } },
     AgentNotFoundError: class AgentNotFoundError extends Error {},
     CursorSdkError,
     CursorAgentError
@@ -27,7 +29,8 @@ vi.mock("@/lib/rate-limit", async (importOriginal) => {
 
   return {
     ...actual,
-    checkRateLimit: vi.fn()
+    checkRateLimit: vi.fn(),
+    claimChatConcurrencySlot: vi.fn(actual.claimChatConcurrencySlot)
   };
 });
 
@@ -49,6 +52,14 @@ describe("chat route validation and rate limiting", () => {
   const mockedAgentCreate = vi.mocked(Agent.create);
   const mockedAgentResume = vi.mocked(Agent.resume);
   const mockedAgentGetRun = vi.mocked(Agent.getRun);
+  const mockedListModels = vi.mocked(Cursor.models.list);
+  const mockedClaimSlot = vi.mocked(claimChatConcurrencySlot);
+
+  /** The cheap preflight guard always runs; only the real chat limits count as quota. */
+  function expectNoQuotaCharged() {
+    const routes = mockedCheckRateLimit.mock.calls.map(([route]) => route);
+    expect(routes.filter((route) => route !== "chatPreflight")).toEqual([]);
+  }
 
   function mockAgent(
     modelId: string,
@@ -86,6 +97,9 @@ describe("chat route validation and rate limiting", () => {
     mockedAgentCreate.mockReset();
     mockedAgentResume.mockReset();
     mockedAgentGetRun.mockReset();
+    clearModelCatalogCacheForTests();
+    // Without a reachable catalog the route falls back to the built-in models.
+    mockedListModels.mockReset().mockRejectedValue(new Error("catalog down"));
   });
 
   it("declares a platform duration long enough for cloud agent runs", () => {
@@ -103,7 +117,7 @@ describe("chat route validation and rate limiting", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mockedCheckRateLimit).not.toHaveBeenCalled();
+    expectNoQuotaCharged();
   });
 
   it("does not charge chat rate limits for prompts rejected before agent work", async () => {
@@ -117,7 +131,7 @@ describe("chat route validation and rate limiting", () => {
     );
 
     expect(response.status).toBe(413);
-    expect(mockedCheckRateLimit).not.toHaveBeenCalled();
+    expectNoQuotaCharged();
   });
 
   it("does not charge chat rate limits for invalid models", async () => {
@@ -132,7 +146,7 @@ describe("chat route validation and rate limiting", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mockedCheckRateLimit).not.toHaveBeenCalled();
+    expectNoQuotaCharged();
   });
 
   it("uses the selected model for first runs", async () => {
@@ -232,6 +246,119 @@ describe("chat route validation and rate limiting", () => {
       expect(cancel).not.toHaveBeenCalled();
       expect(dispose).toHaveBeenCalledOnce();
     });
+  });
+
+  const validBody = {
+    apiKey: "key",
+    prompt: "hello",
+    repoUrl: "https://github.com/acme/app",
+    branch: "main"
+  };
+
+  it("runs the preflight guard before reading the body", async () => {
+    mockedCheckRateLimit.mockResolvedValueOnce({
+      allowed: false,
+      retryAfterSeconds: 5
+    });
+
+    const response = await POST(chatRequest(validBody));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("5");
+    expect(mockedCheckRateLimit.mock.calls[0][0]).toBe("chatPreflight");
+    expect(mockedAgentCreate).not.toHaveBeenCalled();
+  });
+
+  it("answers 400, not 500, when fields are not strings", async () => {
+    const response = await POST(
+      chatRequest({ ...validBody, apiKey: 123, prompt: { text: "hi" } })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "API key is required."
+    });
+
+    const nullBody = await POST(chatRequest(null));
+    expect(nullBody.status).toBe(400);
+  });
+
+  it("rejects an API key Cursor refuses instead of starting a run", async () => {
+    mockedListModels.mockRejectedValue(
+      Object.assign(new Error("bad key"), { status: 401 })
+    );
+
+    const response = await POST(chatRequest(validBody));
+
+    expect(response.status).toBe(401);
+    expect(mockedAgentCreate).not.toHaveBeenCalled();
+    expect(mockedCheckRateLimit.mock.calls.map(([route]) => route)).toEqual([
+      "chatPreflight"
+    ]);
+  });
+
+  it("explains when one user already holds their share of streams", async () => {
+    mockedClaimSlot.mockResolvedValueOnce({
+      allowed: false,
+      retryAfterSeconds: 10,
+      reason: "per-user"
+    });
+
+    const response = await POST(chatRequest(validBody));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("10");
+    const { error } = await response.json();
+    expect(error).toMatch(/several runs in progress/);
+    expect(mockedClaimSlot).toHaveBeenCalledWith("key");
+  });
+
+  it("detaches and frees the slot when the client cancels the stream", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const dispose = vi.fn().mockResolvedValue(undefined);
+    const run = {
+      id: "run",
+      agentId: "agent",
+      model: { id: "composer-2.5" },
+      stream: async function* () {
+        await new Promise<void>(() => undefined);
+      },
+      wait: vi.fn(),
+      supports: vi.fn((capability: string) => capability === "cancel"),
+      cancel
+    };
+    mockedAgentCreate.mockResolvedValue({
+      agentId: "agent",
+      send: vi.fn().mockResolvedValue(run),
+      [Symbol.asyncDispose]: dispose
+    } as unknown as Awaited<ReturnType<typeof Agent.create>>);
+
+    const actual = await vi.importActual<typeof import("@/lib/rate-limit")>(
+      "@/lib/rate-limit"
+    );
+    const release = vi.fn();
+    mockedClaimSlot.mockImplementationOnce(async (identity) => {
+      const slot = await actual.claimChatConcurrencySlot(identity);
+      if (!slot.allowed) return slot;
+      return {
+        allowed: true,
+        release: async () => {
+          release();
+          await slot.release();
+        }
+      };
+    });
+
+    const response = await POST(chatRequest(validBody));
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledOnce();
+      expect(dispose).toHaveBeenCalledOnce();
+    });
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("uses separate stable idempotency keys and emits run identity early", async () => {

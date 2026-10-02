@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { memo, useMemo, useState } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { copyText } from "@/lib/clipboard";
 
@@ -91,7 +91,9 @@ function MarkdownCodeBlock({
   );
 }
 
-export default function MarkdownMessage({
+const remarkPlugins = [remarkGfm];
+
+function MarkdownMessage({
   content,
   isUser,
   size = "default"
@@ -100,6 +102,51 @@ export default function MarkdownMessage({
   isUser: boolean;
   size?: "default" | "sm";
 }) {
+  // Rebuilt only when the speaker changes, so a finished message keeps the same
+  // element tree and React can skip it while a later one streams.
+  const components = useMemo<Components>(
+    () => ({
+      a: ({ children, href }) => (
+        <a href={href} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      ),
+      // Remote images in model output would be fetched automatically and can
+      // carry data out in the URL, so they render as plain links.
+      img: ({ src, alt }) =>
+        typeof src === "string" && /^https?:\/\//i.test(src) ? (
+          <a href={src} target="_blank" rel="noreferrer noopener">
+            {alt ? `Image: ${alt}` : "Image link"}
+          </a>
+        ) : (
+          <span>{alt ? `Image: ${alt}` : "Image"}</span>
+        ),
+      pre: ({ children }) => <>{children}</>,
+      code: ({ className, children, ...props }) => {
+        const code = String(children).replace(/\n$/, "");
+        const languageMatch = /language-([\w+-]+)/.exec(className || "");
+        const isBlock = Boolean(languageMatch) || code.includes("\n");
+
+        if (!isBlock) {
+          return (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          );
+        }
+
+        return (
+          <MarkdownCodeBlock
+            code={code}
+            language={languageMatch?.[1]}
+            isUser={isUser}
+          />
+        );
+      }
+    }),
+    [isUser]
+  );
+
   return (
     <div
       className={`message-content w-full min-w-0 ${
@@ -109,39 +156,13 @@ export default function MarkdownMessage({
       } ${isUser ? "message-content-user" : "message-content-assistant"}`}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
-          pre: ({ children }) => <>{children}</>,
-          code: ({ className, children, ...props }) => {
-            const code = String(children).replace(/\n$/, "");
-            const languageMatch = /language-([\w+-]+)/.exec(className || "");
-            const isBlock = Boolean(languageMatch) || code.includes("\n");
-
-            if (!isBlock) {
-              return (
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              );
-            }
-
-            return (
-              <MarkdownCodeBlock
-                code={code}
-                language={languageMatch?.[1]}
-                isUser={isUser}
-              />
-            );
-          }
-        }}
+        remarkPlugins={remarkPlugins}
+        components={components}
       >
         {content}
       </ReactMarkdown>
     </div>
   );
 }
+
+export default memo(MarkdownMessage);

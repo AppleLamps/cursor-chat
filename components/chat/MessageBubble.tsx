@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   ChevronDownIcon,
   CopyIcon,
@@ -35,11 +35,12 @@ import {
   MessageFooter,
 } from "@/components/ui/message";
 
-export default function MessageBubble({
+function MessageBubble({
   message,
   repoUrl,
   branch,
   copied,
+  canRegenerate = false,
   onCopy,
   onRetry,
   artifactScope
@@ -48,8 +49,11 @@ export default function MessageBubble({
   repoUrl?: string;
   branch?: string;
   copied: boolean;
-  onCopy: () => void;
-  onRetry: () => void;
+  /** Only the latest answer can be regenerated, and never in Implement mode. */
+  canRegenerate?: boolean;
+  /** Stable callbacks that take the message, so memoised bubbles can be skipped. */
+  onCopy: (message: Message) => void;
+  onRetry: (messageId: string) => void;
   artifactScope?: {
     apiKey: string;
     conversation: Conversation;
@@ -194,14 +198,21 @@ export default function MessageBubble({
           ) : null}
           {!isUser && !message.error && !isStreaming ? (
             <span className="inline-flex items-center gap-1 transition sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-within:opacity-100">
-              <Button type="button" variant="ghost" size="xs" onClick={onCopy}>
+              <Button type="button" variant="ghost" size="xs" onClick={() => onCopy(message)}>
                 <CopyIcon />
                 {copied ? "Copied" : "Copy"}
               </Button>
-              <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
-                <RefreshCwIcon />
-                Retry
-              </Button>
+              {canRegenerate ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => onRetry(message.id)}
+                >
+                  <RefreshCwIcon />
+                  Retry
+                </Button>
+              ) : null}
             </span>
           ) : null}
         </MessageFooter>
@@ -299,3 +310,5 @@ function SourcesPanel({
     </div>
   );
 }
+
+export default memo(MessageBubble);

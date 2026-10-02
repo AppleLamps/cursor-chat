@@ -18,6 +18,59 @@ export function parseGitHubRepoUrl(repoUrl: string): GitHubRepoRef | null {
   };
 }
 
+/** Carries the HTTP status so routes can map it without parsing messages. */
+export class GitHubApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "GitHubApiError";
+  }
+}
+
+const GITHUB_API_ORIGIN = "https://api.github.com";
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_BRANCHES = 300;
+const MAX_BRANCH_PAGES = 5;
+
+async function githubFetch(url: string, headers: Record<string, string>) {
+  try {
+    return await fetch(url, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+  } catch {
+    throw new GitHubApiError("GitHub did not respond in time. Try again.", 504);
+  }
+}
+
+function failureFor(response: Response, fallback: string, notFound?: string) {
+  if (response.status === 401) {
+    return new GitHubApiError("GitHub token is invalid or expired.", 401);
+  }
+  if (
+    response.status === 429 ||
+    (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0")
+  ) {
+    return new GitHubApiError(
+      "GitHub rate limit reached. Wait a few minutes and try again.",
+      429
+    );
+  }
+  if (response.status === 403) {
+    return new GitHubApiError(
+      "This GitHub token cannot access that repository. Check its permissions or SSO authorization.",
+      403
+    );
+  }
+  if (response.status === 404 && notFound) {
+    return new GitHubApiError(notFound, 404);
+  }
+  return new GitHubApiError(fallback, 502);
+}
+
 type GitHubRepoResponse = {
   default_branch?: string;
 };
@@ -43,46 +96,50 @@ export async function listGitHubBranches(
     "X-GitHub-Api-Version": "2022-11-28"
   };
 
-  const repoResponse = await fetch(
-    `https://api.github.com/repos/${ref.owner}/${ref.repo}`,
-    { headers, cache: "no-store" }
-  );
+  const repoPrefix = `${GITHUB_API_ORIGIN}/repos/${ref.owner}/${ref.repo}`;
+  const repoResponse = await githubFetch(repoPrefix, headers);
 
   if (!repoResponse.ok) {
-    if (repoResponse.status === 401) {
-      throw new Error("GitHub token is invalid or expired.");
-    }
-
-    if (repoResponse.status === 404) {
-      throw new Error("Repository not found or token lacks access to this repo.");
-    }
-
-    throw new Error("Failed to load repository details from GitHub.");
+    throw failureFor(
+      repoResponse,
+      "Failed to load repository details from GitHub.",
+      "Repository not found or token lacks access to this repo."
+    );
   }
 
   const repoData = (await repoResponse.json()) as GitHubRepoResponse;
-  const defaultBranch = repoData.default_branch?.trim();
+  const defaultBranch =
+    typeof repoData.default_branch === "string"
+      ? repoData.default_branch.trim()
+      : undefined;
   const branches: string[] = [];
-  let nextUrl: string | null =
-    `https://api.github.com/repos/${ref.owner}/${ref.repo}/branches?per_page=100`;
+  let nextUrl: string | null = `${repoPrefix}/branches?per_page=100`;
 
-  while (nextUrl && branches.length < 300) {
-    const response = await fetch(nextUrl, { headers, cache: "no-store" });
+  for (
+    let pages = 0;
+    nextUrl && pages < MAX_BRANCH_PAGES && branches.length < MAX_BRANCHES;
+    pages += 1
+  ) {
+    const response: Response = await githubFetch(nextUrl, headers);
 
     if (!response.ok) {
-      throw new Error("Failed to load branches from GitHub.");
+      throw failureFor(response, "Failed to load branches from GitHub.");
     }
 
-    const page = (await response.json()) as GitHubBranchResponse[];
+    const page: unknown = await response.json();
+    if (!Array.isArray(page)) {
+      throw new GitHubApiError("GitHub returned an unexpected response.", 502);
+    }
 
-    for (const branch of page) {
-      if (branch.name?.trim()) {
+    for (const branch of page as GitHubBranchResponse[]) {
+      if (typeof branch?.name === "string" && branch.name.trim()) {
         branches.push(branch.name.trim());
       }
     }
 
-    const link = response.headers.get("link");
-    nextUrl = parseGitHubNextLink(link);
+    // The bearer token is only ever sent back to this repository's own API.
+    const next = parseGitHubNextLink(response.headers.get("link"));
+    nextUrl = next && next.startsWith(`${repoPrefix}/branches`) ? next : null;
   }
 
   const uniqueBranches = [...new Set(branches)].sort((a, b) =>

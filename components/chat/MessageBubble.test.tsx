@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import MessageBubble from "@/components/chat/MessageBubble";
 
 afterEach(cleanup);
@@ -117,5 +117,53 @@ describe("MessageBubble agent progress", () => {
     );
     expect(view.getByText("Fix").tagName).toBe("STRONG");
     expect(view.queryByText(/## Plan/)).toBeNull();
+  });
+});
+
+describe("MessageBubble actions", () => {
+  const answer = {
+    id: "a1",
+    role: "assistant" as const,
+    content: "Here is the answer.",
+    createdAt: "2026-06-26T12:00:00.000Z"
+  };
+
+  it("offers Retry only when the answer can be regenerated", () => {
+    const hidden = render(
+      <MessageBubble message={answer} copied={false} onCopy={() => {}} onRetry={() => {}} />
+    );
+    expect(hidden.queryByRole("button", { name: /Retry/ })).toBeNull();
+    hidden.unmount();
+
+    const shown = render(
+      <MessageBubble
+        message={answer}
+        copied={false}
+        canRegenerate
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+    expect(shown.getByRole("button", { name: /Retry/ })).toBeTruthy();
+  });
+
+  it("passes the message and its id to the shared handlers", () => {
+    const onCopy = vi.fn();
+    const onRetry = vi.fn();
+    const view = render(
+      <MessageBubble
+        message={answer}
+        copied={false}
+        canRegenerate
+        onCopy={onCopy}
+        onRetry={onRetry}
+      />
+    );
+
+    fireEvent.click(view.getByRole("button", { name: /Copy/ }));
+    fireEvent.click(view.getByRole("button", { name: /Retry/ }));
+
+    expect(onCopy).toHaveBeenCalledWith(answer);
+    expect(onRetry).toHaveBeenCalledWith("a1");
   });
 });
