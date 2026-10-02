@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ChatStreamError,
   consumeChatStream,
+  isRecoverableStreamFailure,
   type ChatStreamDone
 } from "@/lib/chat-stream";
 import { formatSseEvent } from "@/lib/sse";
@@ -170,5 +171,83 @@ describe("consumeChatStream", () => {
       name: "ChatStreamError",
       message: "Received malformed chat stream data."
     } satisfies Partial<ChatStreamError>);
+  });
+});
+
+describe("stalled and dropped streams", () => {
+  function openStream() {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        }
+      }),
+      { headers: { "Content-Type": "text/event-stream" } }
+    );
+    return { response, controller };
+  }
+
+  it("fails as retryable when no bytes (not even a heartbeat) arrive in time", async () => {
+    const { response } = openStream();
+
+    const failure = await consumeChatStream(response, {}, { idleTimeoutMs: 25 }).catch(
+      (error) => error
+    );
+
+    expect(failure).toBeInstanceOf(ChatStreamError);
+    expect(failure.code).toBe("stream_stalled");
+    expect(failure.retryable).toBe(true);
+    expect(isRecoverableStreamFailure(failure)).toBe(true);
+  });
+
+  it("treats heartbeat comments as activity so a quiet but healthy run is not cut off", async () => {
+    const { response, controller } = openStream();
+    const encoder = new TextEncoder();
+    const heartbeats = setInterval(
+      () => controller.enqueue(encoder.encode(": heartbeat\n\n")),
+      10
+    );
+    const finishing = setTimeout(() => {
+      controller.enqueue(
+        encoder.encode(
+          formatSseEvent("done", { agentId: "a", runId: "r", status: "finished" })
+        )
+      );
+      controller.close();
+    }, 120);
+
+    let done: ChatStreamDone | undefined;
+    await consumeChatStream(response, { onDone: (payload) => (done = payload) }, {
+      idleTimeoutMs: 40
+    });
+    clearInterval(heartbeats);
+    clearTimeout(finishing);
+
+    expect(done?.runId).toBe("r");
+  });
+
+  it("reports an early close as a retryable connection error", async () => {
+    const failure = await consumeChatStream(streamResponse([]), {}).catch((e) => e);
+
+    expect(failure).toBeInstanceOf(ChatStreamError);
+    expect(failure.code).toBe("connection_closed");
+    expect(failure.message).toBe("The connection closed before the answer finished.");
+    expect(isRecoverableStreamFailure(failure)).toBe(true);
+  });
+
+  it("only treats connection-level failures as recoverable", () => {
+    expect(isRecoverableStreamFailure(new TypeError("network error"))).toBe(true);
+    expect(
+      isRecoverableStreamFailure(new ChatStreamError("timed out", { retryable: true }))
+    ).toBe(true);
+    expect(
+      isRecoverableStreamFailure(new ChatStreamError("bad key", { retryable: false }))
+    ).toBe(false);
+    expect(isRecoverableStreamFailure(new ChatStreamError("run failed"))).toBe(false);
+    expect(isRecoverableStreamFailure(new Error("HTTP 429"))).toBe(false);
+    expect(isRecoverableStreamFailure(new DOMException("stopped", "AbortError"))).toBe(
+      false
+    );
   });
 });

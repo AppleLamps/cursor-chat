@@ -5,6 +5,12 @@ const ATTACHMENT_DB_STORE = "image-data-urls";
 
 let attachmentDbPromise: Promise<IDBDatabase> | null = null;
 
+/**
+ * Keys known to be in IndexedDB already. State keeps the data: URL after a
+ * reload, so without this every save would rewrite every image.
+ */
+const persistedImageKeys = new Set<string>();
+
 function openAttachmentDb() {
   if (!("indexedDB" in window)) {
     return Promise.reject(new Error("IndexedDB is not available."));
@@ -64,6 +70,9 @@ export async function pruneStoredImages(activeKeys: Set<string>) {
           store.delete(key);
         }
       }
+      for (const key of [...persistedImageKeys]) {
+        if (!activeKeys.has(key)) persistedImageKeys.delete(key);
+      }
     };
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
@@ -75,11 +84,15 @@ export function imageStorageKey(image: ImageAttachment) {
   return image.storageKey || `image:${image.id}`;
 }
 
-export async function serializeConversationsForStorage(
-  conversations: Conversation[]
-) {
+type PendingImageWrite = { key: string; dataUrl: string };
+
+/**
+ * Replaces inline image data with a storage key. Synchronous so it can also run
+ * while the page is closing; the returned writes still need to reach IndexedDB.
+ */
+export function serializeConversationsSync(conversations: Conversation[]) {
   const activeImageKeys = new Set<string>();
-  const imageWrites: Promise<void>[] = [];
+  const pendingWrites: PendingImageWrite[] = [];
 
   const serialized = conversations.map((conversation) => ({
     ...conversation,
@@ -93,9 +106,9 @@ export async function serializeConversationsForStorage(
 
         const storageKey = imageStorageKey(image);
         activeImageKeys.add(storageKey);
-        imageWrites.push(
-          writeStoredImage(storageKey, image.url).catch(() => undefined)
-        );
+        if (!persistedImageKeys.has(storageKey)) {
+          pendingWrites.push({ key: storageKey, dataUrl: image.url });
+        }
 
         return {
           ...image,
@@ -106,9 +119,28 @@ export async function serializeConversationsForStorage(
     }))
   }));
 
-  await Promise.all(imageWrites);
+  return { conversations: serialized, activeImageKeys, pendingWrites };
+}
 
-  return { conversations: serialized, activeImageKeys };
+export async function writePendingImages(writes: PendingImageWrite[]) {
+  await Promise.all(
+    writes.map(async ({ key, dataUrl }) => {
+      try {
+        await writeStoredImage(key, dataUrl);
+        persistedImageKeys.add(key);
+      } catch {
+        // The chat text is still saved; the image just won't survive a reload.
+      }
+    })
+  );
+}
+
+export async function serializeConversationsForStorage(
+  conversations: Conversation[]
+) {
+  const { pendingWrites, ...rest } = serializeConversationsSync(conversations);
+  await writePendingImages(pendingWrites);
+  return rest;
 }
 
 export async function hydrateConversationsFromStorage(
@@ -129,6 +161,7 @@ export async function hydrateConversationsFromStorage(
 
                   try {
                     const storedUrl = await readStoredImage(image.storageKey);
+                    if (storedUrl) persistedImageKeys.add(image.storageKey);
                     return storedUrl ? { ...image, url: storedUrl } : image;
                   } catch {
                     return image;

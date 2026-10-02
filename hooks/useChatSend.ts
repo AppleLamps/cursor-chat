@@ -2,7 +2,12 @@
 
 import { RefObject, useCallback, useRef, useState } from "react";
 import { isImplementMode, isPlanMode } from "@/lib/agent-mode";
-import { ChatStreamError, consumeChatStream } from "@/lib/chat-stream";
+import {
+  ChatStreamError,
+  consumeChatStream,
+  isRecoverableStreamFailure
+} from "@/lib/chat-stream";
+import { isCoarsePointer } from "@/lib/touch";
 import { MAX_CHAT_IMAGES } from "@/lib/chat-images";
 import { createStreamBuffer } from "@/lib/stream-buffer";
 import { mergeThinkingText } from "@/lib/thinking";
@@ -74,6 +79,57 @@ type ActiveRunIdentity = {
   model: ModelSelection;
 };
 
+/**
+ * Retry re-attaches to the old run only when the connection was lost (the run
+ * may still be going or have finished). In every other case it sends the prompt
+ * again under a new turn id, so the server treats it as a new run instead of
+ * replaying the old one.
+ */
+function recoveryFor(
+  assistantMessage: Message | undefined,
+  userMessage: Message
+): Pick<Message, "runId" | "turnId"> {
+  return assistantMessage?.error &&
+    assistantMessage.recoverable &&
+    assistantMessage.runId
+    ? { runId: assistantMessage.runId, turnId: userMessage.turnId }
+    : { turnId: uid() };
+}
+
+/** How long Stop waits for the run id before giving up on a clean cancel. */
+const STOP_WAIT_FOR_RUN_MS = 20_000;
+/** Heartbeat so a reload can tell a live reply from an abandoned one. */
+const MESSAGE_HEARTBEAT_MS = 10_000;
+
+/**
+ * Asks the server to cancel a cloud run. Resolves false when it could not be
+ * confirmed, so the UI never claims a run stopped when it may still be going.
+ */
+async function requestRunCancel(apiKey: string, run: ActiveRunIdentity) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch("/api/chat/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, ...run }),
+        keepalive: true
+      });
+
+      if (response.ok) return true;
+
+      // Auth/validation failures will not improve on a second try.
+      const transient = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!transient) return false;
+    } catch {
+      // Network error: fall through to one retry.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+
+  return false;
+}
+
 export function useChatSend({
   apiKey,
   activeConversation,
@@ -97,22 +153,66 @@ export function useChatSend({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const activeRunRef = useRef<ActiveRunIdentity | null>(null);
+  // Synchronous guards: state lags a render, so two quick taps could both pass.
+  const isSendingRef = useRef(false);
+  const stopRequestedRef = useRef(false);
+  const stopWaitTimerRef = useRef<number | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const { beginRequest, clearRequest, stopRequest } =
     useAgentRequestController();
 
-  const stopGenerating = useCallback(() => {
-    const activeRun = activeRunRef.current;
-    if (activeRun && apiKey) {
-      void fetch("/api/chat/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, ...activeRun }),
-        keepalive: true
-      }).catch(() => undefined);
-      activeRunRef.current = null;
+  const clearStopWait = useCallback(() => {
+    if (stopWaitTimerRef.current !== null) {
+      window.clearTimeout(stopWaitTimerRef.current);
+      stopWaitTimerRef.current = null;
     }
-    if (stopRequest()) setComposerNote("Agent run stopped.");
-  }, [apiKey, stopRequest]);
+  }, []);
+
+  // The UI stops immediately; the cancel request runs on its own and any
+  // failure is reported instead of silently claiming the run stopped.
+  const cancelRunAndAbort = useCallback(
+    (run: ActiveRunIdentity) => {
+      stopRequest();
+      setComposerNote("Agent run stopped.");
+
+      if (!apiKey) return;
+      void requestRunCancel(apiKey, run).then((cancelled) => {
+        if (!cancelled) {
+          setComposerNote(
+            "Could not confirm the run was cancelled. It may still finish in Cursor."
+          );
+        }
+      });
+    },
+    [apiKey, stopRequest]
+  );
+
+  const stopGenerating = useCallback(() => {
+    if (!isSendingRef.current) return;
+
+    const activeRun = activeRunRef.current;
+    if (activeRun) {
+      activeRunRef.current = null;
+      cancelRunAndAbort(activeRun);
+      return;
+    }
+
+    // No run id yet (the agent is still starting). Aborting now would detach
+    // from a run we could never cancel, so wait for the id and cancel it then.
+    if (stopRequestedRef.current) return;
+    stopRequestedRef.current = true;
+    setComposerNote("Stopping... waiting for the agent to start so it can be cancelled.");
+    stopWaitTimerRef.current = window.setTimeout(() => {
+      stopWaitTimerRef.current = null;
+      if (!stopRequestedRef.current) return;
+      stopRequestedRef.current = false;
+      stopRequest();
+      setComposerNote(
+        "Stopped waiting. The agent may still finish in Cursor."
+      );
+    }, STOP_WAIT_FOR_RUN_MS);
+  }, [cancelRunAndAbort, stopRequest]);
 
   const sendMessage = useCallback(
     async (
@@ -139,7 +239,8 @@ export function useChatSend({
         (!trimmed &&
           imagesForMessage.length === 0 &&
           pdfsForMessage.length === 0) ||
-        isSending
+        isSending ||
+        isSendingRef.current
       ) {
         return;
       }
@@ -190,6 +291,8 @@ export function useChatSend({
 
       setError(null);
       setComposerNote(null);
+      isSendingRef.current = true;
+      stopRequestedRef.current = false;
       setIsSending(true);
       setExternalSyncPaused(true);
 
@@ -217,7 +320,7 @@ export function useChatSend({
         : undefined;
       const optimisticMessages = retry
         ? cleanMessages.map((message) =>
-            message.id === retriedUserMessageId && !message.turnId
+            message.id === retriedUserMessageId && message.turnId !== turnId
               ? { ...message, turnId }
               : message
           )
@@ -250,6 +353,7 @@ export function useChatSend({
         content: "",
         createdAt: new Date().toISOString(),
         streaming: true,
+        heartbeatAt: Date.now(),
         activity: assistantActivity,
         activityLog: [assistantActivity],
         turnId
@@ -273,6 +377,11 @@ export function useChatSend({
       });
       streamBuffer.setActivity(assistantActivity);
       const requestController = beginRequest();
+      const heartbeat = window.setInterval(() => {
+        patchMessageForConversation(conversationId, assistantId, {
+          heartbeatAt: Date.now()
+        });
+      }, MESSAGE_HEARTBEAT_MS);
 
       try {
         const response = await fetch("/api/chat", {
@@ -346,6 +455,14 @@ export function useChatSend({
               runId: payload.runId,
               turnId
             });
+
+            if (stopRequestedRef.current) {
+              stopRequestedRef.current = false;
+              clearStopWait();
+              const run = activeRunRef.current;
+              activeRunRef.current = null;
+              if (run) cancelRunAndAbort(run);
+            }
           },
           onText: (delta) => {
             if (!replyStarted) {
@@ -453,16 +570,31 @@ export function useChatSend({
           : caught instanceof Error
             ? caught.message
             : "Something went wrong.";
+        const failedRunId =
+          (caught instanceof ChatStreamError ? caught.runId : undefined) ??
+          assistantRunId;
+
+        // Whatever streamed before the failure is still useful; keep it.
+        streamBuffer.flushNow();
+        const partial = streamBuffer.getSnapshot();
+        const partialText = assistantContent.trim();
+
         const errorMessage: Message = {
           id: assistantId,
           role: "assistant",
-          content: message,
+          content: partialText ? `${assistantContent}\n\n_${message}_` : message,
           createdAt: streamingAssistant.createdAt,
           error: true,
           streaming: false,
-          runId:
-            (caught instanceof ChatStreamError ? caught.runId : undefined) ??
-            assistantRunId,
+          thinking: assistantThinking || undefined,
+          activityLog: partial.activityLog.length ? partial.activityLog : undefined,
+          trace: partial.trace.length ? partial.trace : undefined,
+          sources: assistantSources.length ? assistantSources : undefined,
+          runId: failedRunId,
+          // Only a lost connection leaves a run worth re-attaching to; a failed
+          // or cancelled run would just replay the same failure.
+          recoverable:
+            !wasAborted && Boolean(failedRunId) && isRecoverableStreamFailure(caught),
           requestId:
             caught instanceof ChatStreamError ? caught.requestId : undefined,
           turnId
@@ -478,13 +610,18 @@ export function useChatSend({
           resolvedAgentSessionToken
         );
       } finally {
+        window.clearInterval(heartbeat);
+        clearStopWait();
+        stopRequestedRef.current = false;
         if (activeRunRef.current?.runId === assistantRunId) {
           activeRunRef.current = null;
         }
         clearRequest(requestController);
+        isSendingRef.current = false;
         setExternalSyncPaused(false);
         setIsSending(false);
-        inputRef.current?.focus();
+        // Refocusing on a phone would pop the keyboard over the answer.
+        if (!isCoarsePointer()) inputRef.current?.focus();
       }
     },
     [
@@ -493,8 +630,10 @@ export function useChatSend({
       activeConversationIdRef,
       apiKey,
       beginRequest,
+      cancelRunAndAbort,
       clearDraft,
       clearRequest,
+      clearStopWait,
       inputRef,
       isSending,
       mergeSourceForConversation,
@@ -509,12 +648,22 @@ export function useChatSend({
     ]
   );
 
+  // sendMessage changes identity on every streamed flush, so the retry
+  // callbacks go through a ref to stay stable (the message list is memoised).
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+
   const retryAssistantMessage = useCallback(
     (messageId: string) => {
-      const messageIndex = messages.findIndex((message) => message.id === messageId);
-      if (messageIndex <= 0) return;
+      if (isSendingRef.current) return;
 
-      const previousMessages = messages.slice(0, messageIndex);
+      const currentMessages = messagesRef.current;
+      const messageIndex = currentMessages.findIndex((message) => message.id === messageId);
+      // Only the latest answer can be retried: the cloud agent already holds
+      // every later turn, so rewinding the local copy would diverge from it.
+      if (messageIndex <= 0 || messageIndex !== currentMessages.length - 1) return;
+
+      const previousMessages = currentMessages.slice(0, messageIndex);
       const previousUserMessage = [...previousMessages]
         .reverse()
         .find((message) => message.role === "user");
@@ -525,36 +674,42 @@ export function useChatSend({
       }
 
       const nextMessages = previousMessages.filter((message) => !message.error);
-      if (activeConversation) {
-        replaceMessagesForConversation(activeConversation.id, nextMessages);
-      }
-      void sendMessage(previousUserMessage.content, true, nextMessages, {
-        imageAttachments: previousUserMessage.imageAttachments,
-        pdfAttachments: previousUserMessage.pdfAttachments
-      }, {
-        runId: messages[messageIndex]?.runId,
-        turnId: previousUserMessage.turnId
-      });
+      void sendMessageRef.current(
+        previousUserMessage.content,
+        true,
+        nextMessages,
+        {
+          imageAttachments: previousUserMessage.imageAttachments,
+          pdfAttachments: previousUserMessage.pdfAttachments
+        },
+        recoveryFor(currentMessages[messageIndex], previousUserMessage)
+      );
     },
-    [activeConversation, messages, replaceMessagesForConversation, sendMessage]
+    []
   );
 
   const retryLast = useCallback(() => {
-    const lastUserMessage = [...messages]
+    if (isSendingRef.current) return;
+
+    const currentMessages = messagesRef.current;
+    const lastUserMessage = [...currentMessages]
       .reverse()
       .find((message) => message.role === "user");
     if (!lastUserMessage) return;
-    const lastAssistantMessage = [...messages]
+    const lastAssistantMessage = [...currentMessages]
       .reverse()
       .find((message) => message.role === "assistant");
-    void sendMessage(lastUserMessage.content, true, messages, {
-      imageAttachments: lastUserMessage.imageAttachments,
-      pdfAttachments: lastUserMessage.pdfAttachments
-    }, {
-      runId: lastAssistantMessage?.error ? lastAssistantMessage.runId : undefined,
-      turnId: lastUserMessage.turnId
-    });
-  }, [messages, sendMessage]);
+    void sendMessageRef.current(
+      lastUserMessage.content,
+      true,
+      currentMessages,
+      {
+        imageAttachments: lastUserMessage.imageAttachments,
+        pdfAttachments: lastUserMessage.pdfAttachments
+      },
+      recoveryFor(lastAssistantMessage, lastUserMessage)
+    );
+  }, []);
 
   const copyMessage = useCallback(async (message: Message) => {
     try {

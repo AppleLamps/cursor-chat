@@ -4,6 +4,7 @@ import type { ModelSelection } from "@/lib/model-client";
 import {
   latestUserMessage,
   resolveConversationAgentMode,
+  resolveConversationModel,
   resolveConversationModelId,
   sortConversations,
   withPersistedMessages
@@ -126,7 +127,22 @@ export function conversationReducer(
         )
       };
 
-    case "change-repo":
+    case "change-repo": {
+      // Re-saving the same repo, branch and model must not throw away the cloud
+      // agent (and with it the conversation's context on the Cursor side).
+      const current = state.conversations.find(
+        (conversation) => conversation.id === action.id
+      );
+      if (
+        current &&
+        current.repoUrl === action.repoUrl &&
+        (current.branch || DEFAULT_BRANCH) === action.branch &&
+        JSON.stringify(resolveConversationModel(current)) ===
+          JSON.stringify(action.model ?? { id: action.modelId })
+      ) {
+        return state;
+      }
+
       return {
         ...state,
         conversations: sortConversations(
@@ -146,6 +162,7 @@ export function conversationReducer(
           )
         )
       };
+    }
 
     case "change-mode":
       return {

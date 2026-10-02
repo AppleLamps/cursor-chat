@@ -127,7 +127,6 @@ export default function Composer({
           enterKeyHint="enter"
           autoCapitalize="sentences"
           className="max-h-40 min-h-[50px] w-full resize-none bg-transparent px-3.5 py-3 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-44 sm:px-4 [@media(max-height:500px)]:max-h-20"
-          disabled={isSending}
         />
         <div className="flex items-center justify-between px-2 pb-1 pt-1">
           <div className="flex items-center gap-1.5">
