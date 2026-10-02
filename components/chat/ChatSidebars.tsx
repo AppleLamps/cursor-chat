@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef } from "react";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import type { Conversation } from "@/lib/chat-types";
 import SidebarPanel from "@/components/chat/SidebarPanel";
 
@@ -50,16 +52,28 @@ export default function ChatSidebars({
   onConnectGitHub?: () => void;
   githubConnectError?: string | null;
 }) {
+  const drawerRef = useRef<HTMLElement>(null);
+  useDialogFocus(drawerRef, {
+    active: mobileSidebarOpen,
+    onClose: onCloseMobileSidebar
+  });
+
   return (
     <>
       {mobileSidebarOpen ? (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             aria-label="Close sidebar"
+            tabIndex={-1}
             className="absolute inset-0 bg-black/25"
             onClick={onCloseMobileSidebar}
           />
-          <aside className="absolute left-0 top-0 flex h-full w-[min(20rem,86vw)] flex-col border-r border-[#e8e8e8] bg-[#f9f9f9] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)] shadow-[12px_0_40px_rgba(0,0,0,0.12)]">
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Chats and settings"
+            className="absolute left-0 top-0 flex h-full w-[min(20rem,86vw)] flex-col border-r border-[#e8e8e8] bg-[#f9f9f9] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)] shadow-[12px_0_40px_rgba(0,0,0,0.12)]">
             <SidebarPanel
               conversations={conversations}
               activeConversationId={activeConversationId}

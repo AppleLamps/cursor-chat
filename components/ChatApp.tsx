@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Onboarding from "@/components/Onboarding";
 import { startCursorLogin } from "@/lib/cursor-login-client";
 import RepoPicker from "@/components/RepoPicker";
@@ -8,6 +8,8 @@ import ChatHeader from "@/components/chat/ChatHeader";
 import Composer from "@/components/chat/Composer";
 import EmptyState from "@/components/chat/EmptyState";
 import ErrorBanner from "@/components/chat/ErrorBanner";
+import StorageWarning from "@/components/chat/StorageWarning";
+import UndoToast from "@/components/chat/UndoToast";
 import ChatSidebars from "@/components/chat/ChatSidebars";
 import MessageBubble from "@/components/chat/MessageBubble";
 import {
@@ -61,6 +63,7 @@ export default function ChatApp({
   const [repoPickerMode, setRepoPickerMode] =
     useState<RepoPickerMode>("initial");
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [undoDelete, setUndoDelete] = useState<Conversation | null>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,10 +77,7 @@ export default function ChatApp({
   const auth = useAuthSettings();
   const repos = useRepoCatalog(auth.apiKey, auth.hasAuthHydrated);
   const modelCatalog = useModelCatalog(auth.apiKey);
-  const conversations = useConversationStore({
-    apiKey: auth.apiKey,
-    onError: (message) => setChatErrorRef.current(message)
-  });
+  const conversations = useConversationStore({ apiKey: auth.apiKey });
 
   const appendInput = useCallback((text: string) => {
     setInput((current) => [current.trim(), text].filter(Boolean).join("\n\n"));
@@ -121,6 +121,21 @@ export default function ChatApp({
   });
   setChatErrorRef.current = chat.setError;
   setComposerNoteRef.current = chat.setComposerNote;
+
+  // Memoised so finished messages keep identical props while a reply streams.
+  const lastAssistantId = useMemo(
+    () =>
+      [...conversations.messages].reverse().find((message) => message.role === "assistant")
+        ?.id,
+    [conversations.messages]
+  );
+  const artifactScope = useMemo(
+    () =>
+      conversations.activeConversation && auth.apiKey
+        ? { apiKey: auth.apiKey, conversation: conversations.activeConversation }
+        : undefined,
+    [auth.apiKey, conversations.activeConversation]
+  );
 
   const voice = useVoiceInput({
     input,
@@ -238,8 +253,22 @@ export default function ChatApp({
     setMobileSidebarOpen(false);
   }
 
+  const expireUndoDelete = useCallback(() => setUndoDelete(null), []);
+
+  function undoConversationDelete() {
+    if (!undoDelete) return;
+    // Re-adding clears the deletion marker, so other tabs bring it back too.
+    conversations.createAndActivateConversation(undoDelete);
+    setUndoDelete(null);
+  }
+
   function deleteConversation(id: string) {
+    const snapshot = conversations.conversations.find(
+      (conversation) => conversation.id === id
+    );
     conversations.deleteConversation(id);
+    // An empty chat has nothing worth restoring.
+    setUndoDelete(snapshot && snapshot.messages.length > 0 ? snapshot : null);
 
     if (id === conversations.activeConversationId) {
       setInput("");
@@ -366,6 +395,16 @@ export default function ChatApp({
       : null;
   const resolvedComposerNote = chat.composerNote ?? implementModeNote ?? planModeNote;
   const hasMessages = conversations.messages.length > 0;
+  // An error saved with the chat (an interrupted reply found after a reload)
+  // still needs a way to retry, not just an error from this session.
+  const lastMessage = conversations.messages[conversations.messages.length - 1];
+  const savedError =
+    !chat.isSending && lastMessage?.role === "assistant" && lastMessage.error
+      ? lastMessage.recoverable
+        ? "This reply was interrupted. Retry to reconnect."
+        : "The last reply did not complete."
+      : null;
+  const bannerError = chat.error ?? savedError;
   const canSend =
     (input.trim().length > 0 ||
       attachments.pendingImages.length > 0 ||
@@ -381,9 +420,15 @@ export default function ChatApp({
   const defaultRepoLabel = getDefaultRepo() ? repoLabel(getDefaultRepo()!) : null;
   const composer = (
     <>
-      {chat.error && (
+      {conversations.storageWarning && (
+        <StorageWarning
+          message={conversations.storageWarning}
+          onDismiss={conversations.dismissStorageWarning}
+        />
+      )}
+      {bannerError && (
         <ErrorBanner
-          message={chat.error}
+          message={bannerError}
           canRetry={
             Boolean(conversations.lastUserMessage) ||
             conversations.lastAssistantErrored
@@ -588,6 +633,14 @@ export default function ChatApp({
           onDeleteCloudAgent={() => void manageCloudAgent("delete")}
         />
 
+        {undoDelete ? (
+          <UndoToast
+            message={`Deleted "${undoDelete.title}"`}
+            onUndo={undoConversationDelete}
+            onExpire={expireUndoDelete}
+          />
+        ) : null}
+
         {!hasMessages ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:px-6 md:py-8">
             {/* Phones: suggestions scroll, composer stays pinned to the bottom.
@@ -629,15 +682,17 @@ export default function ChatApp({
                         repoUrl={conversations.activeConversation?.repoUrl}
                         branch={conversations.activeConversation?.branch || DEFAULT_BRANCH}
                         copied={chat.copiedMessageId === message.id}
-                        onCopy={() => void chat.copyMessage(message)}
-                        onRetry={() => chat.retryAssistantMessage(message.id)}
+                        canRegenerate={
+                          message.id === lastAssistantId &&
+                          !message.error &&
+                          !message.streaming &&
+                          !chat.isSending &&
+                          !isImplementMode(conversations.activeAgentMode)
+                        }
+                        onCopy={chat.copyMessage}
+                        onRetry={chat.retryAssistantMessage}
                         artifactScope={
-                          conversations.activeConversation && auth.apiKey
-                            ? {
-                                apiKey: auth.apiKey,
-                                conversation: conversations.activeConversation
-                              }
-                            : undefined
+                          message.id === lastAssistantId ? artifactScope : undefined
                         }
                       />
                     </MessageScrollerItem>
