@@ -44,7 +44,11 @@ import { useModelCatalog } from "@/hooks/useModelCatalog";
 
 const SIDEBAR_STORAGE_KEY = STORAGE_KEYS.SIDEBAR;
 
-export default function ChatApp() {
+export default function ChatApp({
+  githubOAuthEnabled = false
+}: {
+  githubOAuthEnabled?: boolean;
+}) {
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -427,7 +431,14 @@ export default function ChatApp() {
   }
 
   if (!auth.apiKey) {
-    return <Onboarding onComplete={auth.completeOnboarding} />;
+    return (
+      <Onboarding
+        onComplete={auth.completeOnboarding}
+        githubToken={auth.githubToken}
+        githubError={auth.githubConnectError}
+        onConnectGitHub={githubOAuthEnabled ? auth.connectGitHub : undefined}
+      />
+    );
   }
 
   if (needsInitialRepoPicker) {
@@ -474,6 +485,10 @@ export default function ChatApp() {
         onSignOut={handleSignOut}
         onClearGitHubToken={auth.clearGitHubToken}
         onSaveGitHubToken={auth.saveGitHubToken}
+        onConnectGitHub={
+          githubOAuthEnabled ? () => auth.connectGitHub() : undefined
+        }
+        githubConnectError={auth.githubConnectError}
       />
 
       <section className="relative flex min-w-0 flex-1 flex-col bg-background">
