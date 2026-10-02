@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Onboarding from "@/components/Onboarding";
+import { startCursorLogin } from "@/lib/cursor-login-client";
 import RepoPicker from "@/components/RepoPicker";
 import ChatHeader from "@/components/chat/ChatHeader";
 import Composer from "@/components/chat/Composer";
@@ -489,6 +490,7 @@ export default function ChatApp({
         onComplete={auth.completeOnboarding}
         githubToken={auth.githubToken}
         githubError={auth.githubConnectError}
+        onConnectCursor={startCursorLogin}
         onConnectGitHub={githubOAuthEnabled ? auth.connectGitHub : undefined}
       />
     );

@@ -28,6 +28,8 @@ export const RATE_LIMITS = {
   models: { limit: 30, windowMs: 60_000 },
   branches: { limit: 60, windowMs: 60_000 },
   githubAuth: { limit: 20, windowMs: 60_000 },
+  /** Each Cursor sign-in holds a request open while it waits for the browser. */
+  cursorLogin: { limit: 5, windowMs: 60_000 },
   /** Cheap per-IP guard that runs before a chat body is even read. */
   chatPreflight: { limit: 60, windowMs: 60_000 },
   /** Cancel, archive/delete, and artifact calls. */
