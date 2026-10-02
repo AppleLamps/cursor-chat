@@ -29,6 +29,8 @@ import {
   type AgentMode,
 } from "@/lib/defaults";
 import type { ModelSelection } from "@/lib/model-client";
+import { downloadHistoryFile, readHistoryFile } from "@/lib/history-transfer-client";
+import { describeImport } from "@/lib/history-transfer";
 import { repoLabel } from "@/lib/repo";
 import { isCoarsePointer, shouldSendOnEnter } from "@/lib/touch";
 import {
@@ -346,6 +348,14 @@ export default function ChatApp({
     }
   }
 
+  async function importHistoryFile(file: File) {
+    const parsed = await readHistoryFile(file);
+    if (!parsed.ok) return { ok: false, message: parsed.error };
+
+    const plan = conversations.importHistory(parsed.conversations);
+    return { ok: true, message: describeImport(plan, parsed.skipped) };
+  }
+
   function handleSignOut() {
     auth.signOut();
     repos.resetRepositories();
@@ -537,6 +547,8 @@ export default function ChatApp({
         onOpenMobileConversation={openMobileConversation}
         onRenameConversation={conversations.renameConversation}
         onDeleteConversation={deleteConversation}
+        onExportHistory={() => downloadHistoryFile(conversations.exportHistory())}
+        onImportHistory={importHistoryFile}
         onSignOut={handleSignOut}
         onClearGitHubToken={auth.clearGitHubToken}
         onSaveGitHubToken={auth.saveGitHubToken}

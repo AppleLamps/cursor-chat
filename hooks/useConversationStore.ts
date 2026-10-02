@@ -22,6 +22,7 @@ import {
   writePendingImages
 } from "@/lib/chat-attachment-storage";
 import { backupCorruptHistory, persistHistory } from "@/lib/history-storage";
+import { buildHistoryExport, planHistoryImport } from "@/lib/history-transfer";
 import {
   activeConversation as getActiveConversation,
   conversationReducer
@@ -312,6 +313,25 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
 
   const dismissStorageWarning = useCallback(() => setStorageWarning(null), []);
 
+  const exportHistory = useCallback(
+    () => buildHistoryExport(stateRef.current.conversations),
+    []
+  );
+
+  const importHistory = useCallback((incoming: Conversation[]) => {
+    const plan = planHistoryImport(stateRef.current.conversations, incoming);
+
+    if (plan.accepted.length > 0) {
+      // An explicit import brings back chats that were deleted here earlier.
+      for (const conversation of plan.accepted) {
+        delete tombstonesRef.current[conversation.id];
+      }
+      dispatch({ type: "import", conversations: plan.accepted });
+    }
+
+    return plan;
+  }, []);
+
   const createAndActivateConversation = useCallback((conversation: Conversation) => {
     delete tombstonesRef.current[conversation.id];
     dispatch({ type: "create", conversation });
@@ -455,6 +475,8 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
       hasHydrated,
       storageWarning,
       dismissStorageWarning,
+      exportHistory,
+      importHistory,
       canChangeAgentMode: messages.length === 0,
       lastUserMessage: latestUserMessage(messages),
       lastAssistantErrored: messages[messages.length - 1]?.error === true,
@@ -485,6 +507,8 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
       hasHydrated,
       storageWarning,
       dismissStorageWarning,
+      exportHistory,
+      importHistory,
       createAndActivateConversation,
       activateConversation,
       updateConversationRepo,

@@ -107,4 +107,21 @@ describe("useDialogFocus", () => {
 
     expect(document.activeElement).toBe(screen.getByLabelText("two"));
   });
+
+  it("leaves Escape to a search box that has text, then closes once it is empty", () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog label="Outer" onClose={onClose}>
+        <input type="search" aria-label="find" defaultValue="abc" />
+      </Dialog>
+    );
+    const box = screen.getByLabelText("find") as HTMLInputElement;
+
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    box.value = "";
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

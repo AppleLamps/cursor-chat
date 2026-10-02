@@ -22,6 +22,7 @@ export type ConversationAction =
       conversations: Conversation[];
       activeConversationId?: string;
     }
+  | { type: "import"; conversations: Conversation[] }
   | { type: "activate"; conversation: Conversation }
   | { type: "create"; conversation: Conversation }
   | { type: "delete"; id: string }
@@ -82,6 +83,18 @@ export function conversationReducer(
           : conversations[0]?.id ?? state.activeConversationId;
 
       return { conversations, activeConversationId };
+    }
+
+    case "import": {
+      const incoming = new Set(action.conversations.map((conversation) => conversation.id));
+
+      return {
+        ...state,
+        conversations: sortConversations([
+          ...action.conversations,
+          ...state.conversations.filter((conversation) => !incoming.has(conversation.id))
+        ])
+      };
     }
 
     case "activate":

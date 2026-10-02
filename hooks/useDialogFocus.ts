@@ -49,6 +49,16 @@ export function useDialogFocus(
       if (openDialogs[openDialogs.length - 1] !== id) return;
 
       if (event.key === "Escape" && onCloseRef.current) {
+        // In a search box with text, Escape clears the text first.
+        const target = event.target;
+        if (
+          target instanceof HTMLInputElement &&
+          target.type === "search" &&
+          target.value
+        ) {
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
         onCloseRef.current();

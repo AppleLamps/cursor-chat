@@ -23,6 +23,8 @@ export default function ChatSidebars({
   onOpenMobileConversation,
   onRenameConversation,
   onDeleteConversation,
+  onExportHistory,
+  onImportHistory,
   onSignOut,
   onClearGitHubToken,
   onSaveGitHubToken,
@@ -46,6 +48,8 @@ export default function ChatSidebars({
   onOpenMobileConversation: (conversation: Conversation) => void;
   onRenameConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  onExportHistory: () => void;
+  onImportHistory: (file: File) => Promise<{ ok: boolean; message: string }>;
   onSignOut: () => void;
   onClearGitHubToken: () => void;
   onSaveGitHubToken: (token: string) => boolean;
@@ -84,6 +88,8 @@ export default function ChatSidebars({
               onOpenConversation={onOpenMobileConversation}
               onRenameConversation={onRenameConversation}
               onDeleteConversation={onDeleteConversation}
+              onExportHistory={onExportHistory}
+              onImportHistory={onImportHistory}
               onSignOut={onSignOut}
               onClearGitHubToken={onClearGitHubToken}
               onSaveGitHubToken={onSaveGitHubToken}
@@ -109,6 +115,8 @@ export default function ChatSidebars({
             onOpenConversation={onOpenConversation}
             onRenameConversation={onRenameConversation}
             onDeleteConversation={onDeleteConversation}
+              onExportHistory={onExportHistory}
+              onImportHistory={onImportHistory}
             onSignOut={onSignOut}
             onClearGitHubToken={onClearGitHubToken}
             onSaveGitHubToken={onSaveGitHubToken}

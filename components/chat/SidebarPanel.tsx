@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, ReactNode, useRef, useState } from "react";
+import HistorySettings from "@/components/chat/HistorySettings";
+import SidebarSearch from "@/components/chat/SidebarSearch";
 import { useDialogFocus } from "@/hooks/useDialogFocus";
 import SidebarRecents from "@/components/SidebarRecents";
 import type { Conversation } from "@/lib/chat-types";
@@ -17,6 +19,8 @@ export default function SidebarPanel({
   onOpenConversation,
   onRenameConversation,
   onDeleteConversation,
+  onExportHistory,
+  onImportHistory,
   onSignOut,
   onClearGitHubToken,
   onSaveGitHubToken,
@@ -35,6 +39,8 @@ export default function SidebarPanel({
   onOpenConversation: (conversation: Conversation) => void;
   onRenameConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  onExportHistory: () => void;
+  onImportHistory: (file: File) => Promise<{ ok: boolean; message: string }>;
   onSignOut: () => void;
   onClearGitHubToken: () => void;
   onSaveGitHubToken: (token: string) => boolean;
@@ -90,11 +96,14 @@ export default function SidebarPanel({
         />
       </div>
 
-      <div className="mt-6 px-2 text-xs font-semibold text-[#6b6b6b]">
-        Projects
-      </div>
-
-      <div className="mt-2 min-h-0 flex-1 overflow-y-auto pr-1">
+      <SidebarSearch
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onOpenConversation={onOpenConversation}
+      >
+        <div className="px-2 pb-2 text-xs font-semibold text-[#6b6b6b]">
+          Projects
+        </div>
         <SidebarRecents
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -110,7 +119,7 @@ export default function SidebarPanel({
           onRenameConversation={onRenameConversation}
           onDeleteConversation={onDeleteConversation}
         />
-      </div>
+      </SidebarSearch>
 
       <div className="mt-auto border-t border-[#ececec] pt-3">
         <SidebarButton
@@ -283,6 +292,11 @@ export default function SidebarPanel({
                   onClick={onSignOut}
                 />
               </div>
+
+              <HistorySettings
+                onExport={onExportHistory}
+                onImport={onImportHistory}
+              />
             </div>
           </div>
         </div>
