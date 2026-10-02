@@ -27,6 +27,7 @@ import {
 } from "@/lib/defaults";
 import type { ModelSelection } from "@/lib/model-client";
 import { repoLabel } from "@/lib/repo";
+import { isCoarsePointer, shouldSendOnEnter } from "@/lib/touch";
 import {
   STORAGE_KEYS,
   getDefaultAgentMode,
@@ -34,9 +35,11 @@ import {
   getDefaultModel,
   getDefaultRepo
 } from "@/lib/storage";
+import { useAppViewport } from "@/hooks/useAppViewport";
 import { useAttachments } from "@/hooks/useAttachments";
 import { useAuthSettings } from "@/hooks/useAuthSettings";
 import { useChatSend } from "@/hooks/useChatSend";
+import { useComposerDock } from "@/hooks/useComposerDock";
 import { useConversationStore } from "@/hooks/useConversationStore";
 import { useRepoCatalog } from "@/hooks/useRepoCatalog";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
@@ -51,6 +54,7 @@ export default function ChatApp({
 }) {
   const [input, setInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarChosenRef = useRef(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [repoPickerMode, setRepoPickerMode] =
@@ -64,6 +68,8 @@ export default function ChatApp({
     () => undefined
   );
 
+  useAppViewport();
+  const composerDockRef = useComposerDock();
   const auth = useAuthSettings();
   const repos = useRepoCatalog(auth.apiKey, auth.hasAuthHydrated);
   const modelCatalog = useModelCatalog(auth.apiKey);
@@ -122,14 +128,22 @@ export default function ChatApp({
   });
 
   useEffect(() => {
+    // A persistent sidebar only fits on wide screens; tablets and landscape
+    // phones keep it closed (the header button still opens it).
+    const wide = window.matchMedia("(min-width: 1024px)").matches;
     const storedSidebar = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    if (storedSidebar) {
-      setSidebarOpen(storedSidebar !== "collapsed");
-    }
+    setSidebarOpen(wide && storedSidebar !== "collapsed");
   }, []);
 
+  function chooseSidebar(next: boolean | ((current: boolean) => boolean)) {
+    sidebarChosenRef.current = true;
+    setSidebarOpen(next);
+  }
+
   useEffect(() => {
-    if (!conversations.hasHydrated) return;
+    // Only persist an explicit choice, so a narrow-screen default never
+    // overwrites the preference used on desktop.
+    if (!conversations.hasHydrated || !sidebarChosenRef.current) return;
     window.localStorage.setItem(
       SIDEBAR_STORAGE_KEY,
       sidebarOpen ? "expanded" : "collapsed"
@@ -317,13 +331,7 @@ export default function ChatApp({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      void chat.sendMessage(input);
-      return;
-    }
-
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (shouldSendOnEnter(event, isCoarsePointer())) {
       event.preventDefault();
       void chat.sendMessage(input);
     }
@@ -424,7 +432,7 @@ export default function ChatApp({
 
   if (!auth.hasAuthHydrated || !conversations.hasHydrated) {
     return (
-      <main className="flex h-screen items-center justify-center bg-white text-sm text-[#8a8a8a]">
+      <main className="flex min-h-dvh items-center justify-center bg-white text-sm text-[#8a8a8a]">
         Loading...
       </main>
     );
@@ -463,7 +471,7 @@ export default function ChatApp({
   }
 
   return (
-    <main className="flex h-screen overflow-hidden bg-background text-foreground">
+    <main className="app-shell flex overflow-hidden bg-background text-foreground">
       <ChatSidebars
         conversations={conversations.conversations}
         activeConversationId={conversations.activeConversationId}
@@ -473,7 +481,7 @@ export default function ChatApp({
         mobileSidebarOpen={mobileSidebarOpen}
         sidebarOpen={sidebarOpen}
         onCloseMobileSidebar={() => setMobileSidebarOpen(false)}
-        onCollapseSidebar={() => setSidebarOpen(false)}
+        onCollapseSidebar={() => chooseSidebar(false)}
         onNewChat={resetChat}
         onNewMobileChat={startMobileNewChatSameRepo}
         onNewChatInAnotherRepo={startNewChatInAnotherRepo}
@@ -558,7 +566,7 @@ export default function ChatApp({
               conversations.activeConversation?.repoUrl ? "change" : "initial"
             )
           }
-          onToggleSidebar={() => setSidebarOpen((current) => !current)}
+          onToggleSidebar={() => chooseSidebar((current) => !current)}
           onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
           canManageCloudAgent={Boolean(
             conversations.activeConversation?.agentId &&
@@ -579,16 +587,22 @@ export default function ChatApp({
         />
 
         {!hasMessages ? (
-          <div className="flex min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6">
-            <div className="m-auto w-full max-w-3xl space-y-8 py-4 sm:space-y-10">
-              <EmptyState
-                agentMode={conversations.activeAgentMode}
-                onPick={(prompt) => {
-                  setInput(prompt);
-                  inputRef.current?.focus();
-                }}
-              />
-              {composer}
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:px-6 md:py-8">
+            {/* Phones: suggestions scroll, composer stays pinned to the bottom.
+                md+: the original centered layout. */}
+            <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col md:m-auto md:flex-none md:space-y-10 md:py-4">
+              <div className="flex-1 py-6 md:flex-none md:py-0">
+                <EmptyState
+                  agentMode={conversations.activeAgentMode}
+                  onPick={(prompt) => {
+                    setInput(prompt);
+                    inputRef.current?.focus();
+                  }}
+                />
+              </div>
+              <div className="sticky bottom-0 z-10 -mx-4 bg-gradient-to-t from-background via-background to-background/0 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-4 sm:-mx-6 sm:px-6 md:static md:m-0 md:bg-none md:p-0">
+                {composer}
+              </div>
             </div>
           </div>
         ) : (
@@ -600,7 +614,7 @@ export default function ChatApp({
               scrollPreviousItemPeek={96}
             >
               <MessageScroller className="flex-1">
-                <MessageScrollerViewport className="px-4 pb-52 pt-8 sm:px-6 sm:pb-44">
+                <MessageScrollerViewport className="pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(var(--composer-h,13rem)+1rem)] pt-6 sm:px-6 sm:pt-8">
                 <MessageScrollerContent className="mx-auto max-w-3xl gap-6">
                   {conversations.messages.map((message) => (
                     <MessageScrollerItem
@@ -628,11 +642,14 @@ export default function ChatApp({
                   ))}
                 </MessageScrollerContent>
                 </MessageScrollerViewport>
-                <MessageScrollerButton className="bottom-36" />
+                <MessageScrollerButton className="!bottom-[calc(var(--composer-h,9rem)+0.5rem)]" />
               </MessageScroller>
             </MessageScrollerProvider>
 
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 px-4 pb-4 pt-12 sm:px-6">
+            <div
+              ref={composerDockRef}
+              className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-10 sm:px-6 sm:pb-4 sm:pt-12"
+            >
               <div className="pointer-events-auto">{composer}</div>
             </div>
           </>

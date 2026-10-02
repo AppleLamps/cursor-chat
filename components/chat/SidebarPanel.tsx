@@ -67,7 +67,7 @@ export default function SidebarPanel({
         <BrandBlock />
         <button
           onClick={onCollapse}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[#555] transition hover:bg-[#ececec] hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+          className="flex h-11 w-11 items-center justify-center rounded-lg text-[#555] transition hover:bg-[#ececec] hover:text-[#111] active:bg-[#e4e4e4] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:h-8 md:w-8"
           aria-label={collapseLabel}
           title={collapseLabel}
         >
@@ -115,7 +115,7 @@ export default function SidebarPanel({
       </div>
 
       {settingsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:px-4 sm:py-8">
           <button
             type="button"
             aria-label="Close settings"
@@ -126,7 +126,7 @@ export default function SidebarPanel({
             role="dialog"
             aria-modal="true"
             aria-labelledby="settings-title"
-            className="relative z-10 max-h-full w-full max-w-md overflow-y-auto rounded-2xl border border-[#d9d9d9] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
+            className="relative z-10 max-h-[90dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-[1.75rem] border border-[#d9d9d9] bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_20px_60px_rgba(0,0,0,0.18)] sm:max-h-full sm:rounded-2xl sm:pb-5"
           >
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -140,7 +140,7 @@ export default function SidebarPanel({
               <button
                 type="button"
                 onClick={() => setSettingsOpen(false)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xl text-[#666] transition hover:bg-[#f1f1f1] hover:text-[#111] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl text-[#666] transition hover:bg-[#f1f1f1] hover:text-[#111] active:bg-[#f1f1f1] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] sm:h-9 sm:w-9"
                 aria-label="Close settings"
               >
                 ×
@@ -318,7 +318,7 @@ function SettingsAction({
     <button
       type="button"
       onClick={onClick}
-      className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#444] transition hover:bg-[#ececec] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+      className="mt-2 flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-[#444] transition hover:bg-[#ececec] active:bg-[#e4e4e4] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9] md:min-h-0"
     >
       <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[#777]">
         {icon}
@@ -341,7 +341,7 @@ function SidebarButton({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full min-h-10 items-center gap-2.5 rounded-lg border border-[#e0e0e0] bg-white px-3 py-2.5 text-left text-sm font-medium leading-none text-[#303030] shadow-sm transition hover:border-[#d4d4d4] hover:bg-[#f8f8f8] active:border-[#cccccc] active:bg-[#f0f0f0] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
+      className="flex w-full min-h-11 items-center gap-2.5 rounded-lg border border-[#e0e0e0] bg-white px-3 py-2.5 text-left text-sm font-medium leading-none text-[#303030] shadow-sm transition hover:border-[#d4d4d4] hover:bg-[#f8f8f8] active:border-[#cccccc] active:bg-[#f0f0f0] focus:outline-none focus:ring-2 focus:ring-[#d9d9d9]"
     >
       <SidebarIcon>{icon}</SidebarIcon>
       <span className="truncate">{label}</span>

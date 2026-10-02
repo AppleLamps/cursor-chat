@@ -14,14 +14,27 @@ export const metadata: Metadata = {
     siteName: "AskCursor"
   },
   icons: {
-    icon: "/favicon.svg"
+    icon: "/favicon.svg",
+    apple: "/apple-touch-icon.png"
+  },
+  appleWebApp: {
+    capable: true,
+    title: "AskCursor",
+    statusBarStyle: "default"
+  },
+  formatDetection: {
+    telephone: false
   }
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#fbfaf7"
+  // Draw under the notch / home indicator; the UI pads itself with env(safe-area-*).
+  viewportFit: "cover",
+  // Chromium: shrink the layout (not just the visual) viewport for the keyboard.
+  interactiveWidget: "resizes-content",
+  themeColor: "#ffffff"
 };
 
 export default function RootLayout({

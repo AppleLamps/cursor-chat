@@ -1,5 +1,6 @@
 "use client";
 
+import { isCoarsePointer } from "@/lib/touch";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import BranchPicker from "@/components/BranchPicker";
 import RepoRunOptions from "@/components/RepoRunOptions";
@@ -113,7 +114,7 @@ export default function RepoPicker({
   }, [allowModeSelection]);
 
   useEffect(() => {
-    if (!loading && !error && repos.length > 0) {
+    if (!loading && !error && repos.length > 0 && !isCoarsePointer()) {
       searchInputRef.current?.focus();
     }
   }, [loading, error, repos.length]);
@@ -185,7 +186,7 @@ export default function RepoPicker({
               <button
                 type="button"
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[#777] transition hover:bg-[#ececec] hover:text-[#111]"
+                className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-[#777] transition hover:bg-[#ececec] hover:text-[#111] active:bg-[#ececec]"
                 aria-label="Clear search"
               >
                 <IconClose className="h-3.5 w-3.5" />
@@ -196,7 +197,7 @@ export default function RepoPicker({
           <div
             role="listbox"
             aria-label="Repositories"
-            className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1"
+            className="mt-3 max-h-[min(14rem,32dvh)] space-y-2 overflow-y-auto overscroll-contain pr-1"
           >
             {filteredRepos.length === 0 ? (
               <div className="rounded-xl border border-dashed border-[#d9d9d9] px-4 py-8 text-center">
@@ -288,7 +289,13 @@ export default function RepoPicker({
             </p>
           ) : null}
 
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div
+            className={`mt-5 flex flex-wrap gap-2 ${
+              mode === "modal"
+                ? "sticky bottom-0 -mx-5 -mb-5 border-t border-[#ececec] bg-white px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 sm:static sm:m-0 sm:border-0 sm:p-0 sm:mt-5"
+                : ""
+            }`}
+          >
             {onCancel ? (
               <button
                 type="button"
@@ -313,12 +320,12 @@ export default function RepoPicker({
 
   if (mode === "modal") {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 px-4 py-8">
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/25 sm:items-center sm:px-4 sm:py-8">
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="repo-picker-title"
-          className="w-full max-w-lg rounded-[1.75rem] border border-[#d9d9d9] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
+          className="max-h-[92dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-[1.75rem] border border-[#d9d9d9] bg-white p-5 pb-0 shadow-[0_20px_60px_rgba(0,0,0,0.18)] sm:max-h-[calc(100dvh-4rem)] sm:rounded-[1.75rem] sm:pb-5"
         >
           <h2 id="repo-picker-title" className="text-lg font-semibold text-[#202123]">
             {title}
@@ -331,7 +338,7 @@ export default function RepoPicker({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-white px-4 py-10 text-[#0d0d0d]">
+    <main className="flex min-h-dvh items-center justify-center bg-white px-[max(1rem,env(safe-area-inset-left))] pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] text-[#0d0d0d]">
       <div className="w-full max-w-lg">
         <div className="text-center">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#8a8a8a]">

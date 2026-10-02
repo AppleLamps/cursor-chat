@@ -53,7 +53,7 @@ export default function Onboarding({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-white px-4 py-10 text-[#0d0d0d]">
+    <main className="flex min-h-dvh items-center justify-center bg-white px-[max(1rem,env(safe-area-inset-left))] pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-[max(2.5rem,env(safe-area-inset-top))] text-[#0d0d0d]">
       <div className="w-full max-w-md">
         <div className="text-center">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-[#8a8a8a]">
@@ -79,6 +79,8 @@ export default function Onboarding({
             id="cursor-api-key"
             type="password"
             autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
             spellCheck={false}
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -194,6 +196,8 @@ function GitHubTokenField({
         id="github-token"
         type="password"
         autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
         spellCheck={false}
         value={value}
         onChange={(event) => onChange(event.target.value)}
