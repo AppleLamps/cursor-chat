@@ -51,6 +51,15 @@ export type Message = {
   modelId?: string;
   /** Stable identity for one user turn and all retries of that turn. */
   turnId?: string;
+  /**
+   * Set on an error message when the cloud run may still be going (the stream
+   * dropped, stalled or timed out) so Retry should re-attach to `runId`
+   * instead of sending the prompt again.
+   */
+  recoverable?: boolean;
+  /** Epoch ms, refreshed while a reply streams so other tabs and later page
+   *  loads can tell a live run from one that was abandoned. */
+  heartbeatAt?: number;
 };
 
 export type Conversation = {

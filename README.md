@@ -55,8 +55,9 @@ only to the branch-listing endpoint and is not forwarded to Cursor.
 
 #### "Connect GitHub" button (optional)
 
-Cursor only issues API keys from its dashboard (there is no OAuth flow for
-third-party apps), so the Cursor key is always pasted. GitHub does support
+The Cursor key is currently pasted: Cursor's dashboard issues API keys, and this
+app does not yet use the SDK's browser sign-in (`Cursor.auth.login()`, which
+mints an expiring key), so there is no "Connect Cursor" button yet. GitHub does support
 OAuth, so a deployment can offer a **Connect GitHub** button instead of asking
 users to create a personal access token:
 
