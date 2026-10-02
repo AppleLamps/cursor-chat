@@ -47,6 +47,17 @@ export class ChatStreamError extends Error {
   }
 }
 
+/**
+ * True when the live stream failed but the cloud run itself may be fine:
+ * a dropped or stalled connection, a server-side timeout, or a network error.
+ * Provider/auth failures and user cancellation are not recoverable.
+ */
+export function isRecoverableStreamFailure(error: unknown) {
+  if (error instanceof ChatStreamError) return error.retryable === true;
+  // fetch/stream network failures surface as TypeError.
+  return error instanceof TypeError;
+}
+
 export type ChatStreamHandlers = {
   onAgent?: (agentId: string, agentSessionToken?: string) => void;
   onRun?: (payload: {
@@ -61,169 +72,209 @@ export type ChatStreamHandlers = {
   onDone?: (payload: ChatStreamDone) => void;
 };
 
+/** The server sends a heartbeat every 15s; this allows four to go missing. */
+export const STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number
+) {
+  return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new ChatStreamError(
+          "The connection to the agent stalled. Retry to reconnect.",
+          { code: "stream_stalled", retryable: true }
+        )
+      );
+    }, idleTimeoutMs);
+
+    reader.read().then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 export async function consumeChatStream(
   response: Response,
-  handlers: ChatStreamHandlers
+  handlers: ChatStreamHandlers,
+  options: { idleTimeoutMs?: number } = {}
 ) {
   if (!response.body) {
     throw new Error("The server returned an empty streaming response.");
   }
 
+  const idleTimeoutMs = options.idleTimeoutMs ?? STREAM_IDLE_TIMEOUT_MS;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let finished = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs);
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const parsed = parseSseBuffer(buffer);
-    buffer = parsed.rest;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseSseBuffer(buffer);
+      buffer = parsed.rest;
 
-    if (parsed.malformedEvents.length > 0) {
-      throw new ChatStreamError("Received malformed chat stream data.");
-    }
+      if (parsed.malformedEvents.length > 0) {
+        throw new ChatStreamError("Received malformed chat stream data.");
+      }
 
-    for (const { event, data } of parsed.events) {
-      switch (event) {
-        case "run": {
-          const agentId = data.agentId;
-          const runId = data.runId;
-          if (typeof agentId === "string" && typeof runId === "string") {
-            handlers.onRun?.({
-              agentId,
-              runId,
-              agentSessionToken:
+      for (const { event, data } of parsed.events) {
+        switch (event) {
+          case "run": {
+            const agentId = data.agentId;
+            const runId = data.runId;
+            if (typeof agentId === "string" && typeof runId === "string") {
+              handlers.onRun?.({
+                agentId,
+                runId,
+                agentSessionToken:
+                  typeof data.agentSessionToken === "string"
+                    ? data.agentSessionToken
+                    : undefined
+              });
+            }
+            break;
+          }
+          case "agent": {
+            const agentId = data.agentId;
+            if (typeof agentId === "string") {
+              handlers.onAgent?.(
+                agentId,
                 typeof data.agentSessionToken === "string"
                   ? data.agentSessionToken
                   : undefined
-            });
-          }
-          break;
-        }
-        case "agent": {
-          const agentId = data.agentId;
-          if (typeof agentId === "string") {
-            handlers.onAgent?.(
-              agentId,
-              typeof data.agentSessionToken === "string"
-                ? data.agentSessionToken
-                : undefined
-            );
-          }
-          break;
-        }
-        case "text": {
-          const delta = data.delta;
-          if (typeof delta === "string" && delta.length > 0) {
-            handlers.onText?.(delta);
-          }
-          break;
-        }
-        case "thinking": {
-          const delta = data.delta;
-          const text = data.text;
-
-          if (typeof delta === "string" && delta.length > 0) {
-            handlers.onThinking?.({ delta });
+              );
+            }
             break;
           }
-
-          if (typeof text === "string" && text.length > 0) {
-            handlers.onThinking?.({ text });
+          case "text": {
+            const delta = data.delta;
+            if (typeof delta === "string" && delta.length > 0) {
+              handlers.onText?.(delta);
+            }
+            break;
           }
-          break;
-        }
-        case "tool": {
-          const name = data.name;
-          const status = data.status;
-          if (typeof name === "string" && typeof status === "string") {
+          case "thinking": {
+            const delta = data.delta;
+            const text = data.text;
+
+            if (typeof delta === "string" && delta.length > 0) {
+              handlers.onThinking?.({ delta });
+              break;
+            }
+
+            if (typeof text === "string" && text.length > 0) {
+              handlers.onThinking?.({ text });
+            }
+            break;
+          }
+          case "tool": {
+            const name = data.name;
+            const status = data.status;
+            if (typeof name === "string" && typeof status === "string") {
+              handlers.onActivity?.(
+                toolActivityLabel(name, status, {
+                  argsTruncated: data.argsTruncated === true,
+                  resultTruncated: data.resultTruncated === true
+                })
+              );
+            }
+            break;
+          }
+          case "task": {
             handlers.onActivity?.(
-              toolActivityLabel(name, status, {
-                argsTruncated: data.argsTruncated === true,
-                resultTruncated: data.resultTruncated === true
-              })
+              taskActivityLabel(
+                typeof data.status === "string" ? data.status : undefined
+              )
+            );
+            break;
+          }
+          case "source": {
+            const path = data.path;
+            if (typeof path === "string" && path.trim()) {
+              handlers.onSource?.(path.trim());
+            }
+            break;
+          }
+          case "status": {
+            const message = data.message;
+            if (typeof message === "string" && message.trim()) {
+              handlers.onActivity?.(message.trim());
+            }
+            break;
+          }
+          case "done": {
+            const agentId = data.agentId;
+            const runId = data.runId;
+            const status = data.status;
+            if (
+              typeof agentId === "string" &&
+              typeof runId === "string" &&
+              typeof status === "string"
+            ) {
+              finished = true;
+              handlers.onDone?.({
+                agentId,
+                runId,
+                status,
+                agentSessionToken:
+                  typeof data.agentSessionToken === "string"
+                    ? data.agentSessionToken
+                    : undefined,
+                result: typeof data.result === "string" ? data.result : undefined,
+                thinking: typeof data.thinking === "string" ? data.thinking : undefined,
+                prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined,
+                requestId:
+                  typeof data.requestId === "string" ? data.requestId : undefined,
+                usage: normalizeTokenUsage(data.usage),
+                durationMs:
+                  typeof data.durationMs === "number" ? data.durationMs : undefined,
+                modelId: typeof data.model === "string" ? data.model : undefined
+              });
+            }
+            break;
+          }
+          case "error": {
+            const message = data.message;
+            throw new ChatStreamError(
+              typeof message === "string" ? message : "The chat stream failed.",
+              {
+                runId: typeof data.runId === "string" ? data.runId : undefined,
+                requestId:
+                  typeof data.requestId === "string" ? data.requestId : undefined,
+                code: typeof data.code === "string" ? data.code : undefined,
+                status: typeof data.status === "number" ? data.status : undefined,
+                retryable:
+                  typeof data.retryable === "boolean" ? data.retryable : undefined
+              }
             );
           }
-          break;
+          default:
+            break;
         }
-        case "task": {
-          handlers.onActivity?.(
-            taskActivityLabel(
-              typeof data.status === "string" ? data.status : undefined
-            )
-          );
-          break;
-        }
-        case "source": {
-          const path = data.path;
-          if (typeof path === "string" && path.trim()) {
-            handlers.onSource?.(path.trim());
-          }
-          break;
-        }
-        case "status": {
-          const message = data.message;
-          if (typeof message === "string" && message.trim()) {
-            handlers.onActivity?.(message.trim());
-          }
-          break;
-        }
-        case "done": {
-          const agentId = data.agentId;
-          const runId = data.runId;
-          const status = data.status;
-          if (
-            typeof agentId === "string" &&
-            typeof runId === "string" &&
-            typeof status === "string"
-          ) {
-            finished = true;
-            handlers.onDone?.({
-              agentId,
-              runId,
-              status,
-              agentSessionToken:
-                typeof data.agentSessionToken === "string"
-                  ? data.agentSessionToken
-                  : undefined,
-              result: typeof data.result === "string" ? data.result : undefined,
-              thinking: typeof data.thinking === "string" ? data.thinking : undefined,
-              prUrl: typeof data.prUrl === "string" ? data.prUrl : undefined,
-              requestId:
-                typeof data.requestId === "string" ? data.requestId : undefined,
-              usage: normalizeTokenUsage(data.usage),
-              durationMs:
-                typeof data.durationMs === "number" ? data.durationMs : undefined,
-              modelId: typeof data.model === "string" ? data.model : undefined
-            });
-          }
-          break;
-        }
-        case "error": {
-          const message = data.message;
-          throw new ChatStreamError(
-            typeof message === "string" ? message : "The chat stream failed.",
-            {
-              runId: typeof data.runId === "string" ? data.runId : undefined,
-              requestId:
-                typeof data.requestId === "string" ? data.requestId : undefined,
-              code: typeof data.code === "string" ? data.code : undefined,
-              status: typeof data.status === "number" ? data.status : undefined,
-              retryable:
-                typeof data.retryable === "boolean" ? data.retryable : undefined
-            }
-          );
-        }
-        default:
-          break;
       }
     }
+  } finally {
+    // Release the connection on every exit, including errors and stalls.
+    void reader.cancel().catch(() => undefined);
   }
 
   if (!finished) {
-    throw new Error("The connection closed before the answer finished.");
+    throw new ChatStreamError("The connection closed before the answer finished.", {
+      code: "connection_closed",
+      retryable: true
+    });
   }
 }
