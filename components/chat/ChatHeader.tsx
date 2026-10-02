@@ -77,7 +77,7 @@ export default function ChatHeader({
 
   return (
     <>
-      <header className="border-b border-border bg-background md:hidden">
+      <header className="border-b border-border bg-background pt-[env(safe-area-inset-top)] md:hidden">
         <div className="flex h-14 items-center gap-1 pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]">
           <Button
             type="button"
@@ -134,7 +134,7 @@ export default function ChatHeader({
         ) : null}
       </header>
 
-      <header className="hidden h-14 items-center justify-between gap-3 border-b border-border bg-background px-5 md:flex">
+      <header className="hidden h-[calc(3.5rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-background pl-[max(1.25rem,env(safe-area-inset-left))] pr-[max(1.25rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] md:flex">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {!sidebarOpen ? (
             <>
