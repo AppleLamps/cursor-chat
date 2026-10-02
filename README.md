@@ -84,8 +84,10 @@ When they are unset the app behaves exactly as before.
 | Command | Description |
 | --- | --- |
 | `npm run dev` | Start the local development server |
-| `npm run test` | Run the Vitest test suite |
+| `npm run lint` | Run ESLint (Next.js core-web-vitals and TypeScript rules) |
 | `npm run typecheck` | Validate TypeScript without emitting files |
+| `npm run test` | Run the Vitest test suite |
+| `npm run check` | Lint, type-check, and test in one go (what CI runs before building) |
 | `npm run build` | Create an optimized production build |
 | `npm run start` | Serve the production build |
 
@@ -214,8 +216,13 @@ configuration notes and examples.
 ```text
 app/
   api/
+    agents/lifecycle/        Archive, unarchive, or delete a cloud agent
+    artifacts/               List an agent's artifacts (and /download)
+    auth/github/             Optional "Connect GitHub" OAuth start and callback
     branches/route.ts        GitHub branch discovery
     chat/route.ts            Cursor agent lifecycle and SSE streaming
+    chat/cancel/route.ts     Explicit run cancellation
+    models/route.ts          Cursor model catalog
     repos/route.ts           Cursor repository discovery
 components/
   chat/                      Chat interface and message presentation
@@ -223,8 +230,8 @@ components/
   Onboarding.tsx             Runtime credential onboarding
   RepoPicker.tsx             Repository, branch, mode, and model selection
 hooks/
-  useAuthSettings.ts         Local credential preferences
-  useChatSend.ts             Send, retry, and share orchestration
+  useAuthSettings.ts         Local credential preferences and OAuth hash handling
+  useChatSend.ts             Send, stop, retry, and share orchestration
   useConversationStore.ts    Persistent conversation state
 lib/
   agent-policy.ts            Implement-mode authorization rules
@@ -266,9 +273,10 @@ Key operational considerations:
 - Browser or agent environments with privileged automation capabilities require
   an additional security and privacy review.
 
-Current application limits are 12 Ask or Plan chat requests per minute, 6
-Implement requests per minute, 30 repository requests per minute, and 60 branch
-requests per minute. Chat concurrency is also capped deployment-wide.
+Current application limits (per client IP, and for chat also per Cursor key) are
+12 Ask or Plan chat requests per minute, 6 Implement requests per minute, 30
+repository requests per minute, 30 model-catalog requests per minute, and 60
+branch requests per minute. Chat concurrency is also capped deployment-wide.
 
 ## Deployment
 

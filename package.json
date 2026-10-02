@@ -8,9 +8,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "next start"
+    "check": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.35",
@@ -34,6 +36,8 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "autoprefixer": "10.4.27",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.8",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.20",
     "shadcn": "^4.12.0",

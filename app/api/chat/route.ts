@@ -418,8 +418,7 @@ async function recoverRun({
   modelId,
   modelSelection,
   agentId,
-  recoverRunId,
-  send
+  recoverRunId
 }: Pick<
   StreamRunContext,
   | "apiKey"
@@ -429,7 +428,6 @@ async function recoverRun({
   | "modelId"
   | "modelSelection"
   | "agentId"
-  | "send"
 > & { recoverRunId: string }) {
   const run = await Agent.getRun(recoverRunId, {
     runtime: "cloud",
@@ -699,8 +697,6 @@ export async function POST(request: Request) {
       const encoder = new TextEncoder();
       const runTimeoutMs = parseChatRunTimeoutMs();
       let streamClosed = false;
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
       let slotReleased = false;
       let disposableAgent: Awaited<ReturnType<typeof Agent.create>> | null = null;
       let currentRun: Run | null = null;
@@ -784,10 +780,10 @@ export async function POST(request: Request) {
       request.signal.addEventListener("abort", handleRequestAbort, { once: true });
       detachOnCancel = handleRequestAbort;
 
-      timeout = setTimeout(() => {
+      const timeout = setTimeout(() => {
         void terminateRun("timeout");
       }, runTimeoutMs);
-      heartbeat = setInterval(sendHeartbeat, SSE_HEARTBEAT_INTERVAL_MS);
+      const heartbeat = setInterval(sendHeartbeat, SSE_HEARTBEAT_INTERVAL_MS);
 
       try {
         send("status", { message: "Starting Cursor cloud agent..." });
@@ -990,8 +986,8 @@ export async function POST(request: Request) {
         });
       } finally {
         request.signal.removeEventListener("abort", handleRequestAbort);
-        if (timeout) clearTimeout(timeout);
-        if (heartbeat) clearInterval(heartbeat);
+        clearTimeout(timeout);
+        clearInterval(heartbeat);
         await terminationPromise;
         await disposeAgent();
         await releaseSlot();
