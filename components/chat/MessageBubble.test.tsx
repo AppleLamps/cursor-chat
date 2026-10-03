@@ -167,3 +167,34 @@ describe("MessageBubble actions", () => {
     expect(onRetry).toHaveBeenCalledWith("a1");
   });
 });
+
+describe("MessageBubble compact sources", () => {
+  it("keeps a long source list collapsed and exposes every link when expanded", () => {
+    const sources = Array.from({ length: 153 }, (_, index) => `src/file-${index}.ts`);
+    const view = render(
+      <MessageBubble
+        message={{ id: "sources", role: "assistant", content: "Answer", createdAt: "2026-10-03T00:00:00Z", sources }}
+        repoUrl="https://github.com/acme/widgets"
+        branch="main"
+        copied={false}
+        onCopy={() => {}}
+        onRetry={() => {}}
+      />
+    );
+    const toggle = view.getByRole("button", { name: "Sources (153)" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(view.queryByRole("list", { name: "Source files" })).toBeNull();
+    fireEvent.click(toggle);
+    const list = view.getByRole("list", { name: "Source files" });
+    expect(toggle.getAttribute("aria-controls")).toBe(list.id);
+    expect(list.tabIndex).toBe(0);
+    expect(list.className).toContain("max-h-40");
+    expect(list.className).toContain("overflow-y-auto");
+    expect(view.getAllByRole("link")).toHaveLength(153);
+    expect(view.getByRole("link", { name: "src/file-152.ts" }).getAttribute("href")).toBe("https://github.com/acme/widgets/blob/main/src/file-152.ts");
+    fireEvent.click(toggle);
+    expect(view.queryByRole("list", { name: "Source files" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(view.getAllByRole("link")).toHaveLength(153);
+  });
+});

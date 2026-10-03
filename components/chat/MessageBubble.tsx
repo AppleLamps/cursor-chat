@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useId, useState } from "react";
 import {
   ChevronDownIcon,
   CopyIcon,
@@ -89,7 +89,7 @@ function MessageBubble({
 
   return (
     <MessageRow align={align}>
-      <MessageContent>
+      <MessageContent className={isUser ? undefined : "gap-1.5"}>
         {isUser && hasImageAttachments ? (
           <AttachmentGroup className="max-w-[340px] self-end">
             {imageAttachments.map((image) => (
@@ -268,14 +268,16 @@ function SourcesPanel({
   branch: string;
 }) {
   const [open, setOpen] = useState(false);
+  const listId = useId();
 
   return (
-    <div className="mt-4 border-t border-border pt-3">
+    <div className="mt-2 border-t border-border">
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="flex min-h-10 w-full items-center justify-between text-left text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 md:min-h-0"
-        aria-expanded={open ? "true" : "false"}
+        className="flex min-h-11 w-full items-center justify-between text-left text-xs text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 md:min-h-7"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
       >
         <span className="font-medium">Sources ({sources.length})</span>
         <ChevronDownIcon
@@ -284,7 +286,12 @@ function SourcesPanel({
         />
       </button>
       {open ? (
-        <ul className="mt-2 space-y-1">
+        <ul
+          id={listId}
+          aria-label="Source files"
+          tabIndex={0}
+          className="mt-1 max-h-40 space-y-1 overflow-y-auto overscroll-contain rounded-sm pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:max-h-48"
+        >
           {sources.map((path) => {
             const href = repoUrl ? githubBlobUrl(repoUrl, branch, path) : null;
 

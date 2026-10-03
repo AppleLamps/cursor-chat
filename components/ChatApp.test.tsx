@@ -121,6 +121,13 @@ describe("ChatApp", () => {
     });
     expect(sent.turnId).toMatch(/^[A-Za-z0-9_-]+$/);
 
+    // Keep the latest message close to the composer, including its measured height.
+    const viewport = view.container.querySelector('[data-slot="message-scroller-viewport"]');
+    expect(viewport?.className).toContain("pb-[calc(var(--composer-h,10rem)+0.5rem)]");
+    const dock = view.getByRole("textbox").closest("form")?.parentElement?.parentElement;
+    expect(dock?.className).toContain("pt-3");
+    expect(dock?.className).not.toContain("sm:pt-12");
+
     // 4. The conversation is saved for the next visit, without the API key.
     await waitFor(() => {
       const saved = window.localStorage.getItem("codebase-chat-conversations-v1") ?? "";
