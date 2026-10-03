@@ -680,8 +680,8 @@ export default function ChatApp({
               scrollEdgeThreshold={48}
               scrollPreviousItemPeek={96}
             >
-              <MessageScroller className="flex-1">
-                <MessageScrollerViewport className="pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[calc(var(--composer-h,10rem)+0.5rem)] pt-6 sm:px-6 sm:pt-8">
+              <MessageScroller className="min-h-0 flex-1 basis-0">
+                <MessageScrollerViewport className="pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-2 pt-6 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pt-8">
                 <MessageScrollerContent className="mx-auto max-w-3xl gap-6">
                   {conversations.messages.map((message) => (
                     <MessageScrollerItem
@@ -711,15 +711,15 @@ export default function ChatApp({
                   ))}
                 </MessageScrollerContent>
                 </MessageScrollerViewport>
-                <MessageScrollerButton className="!bottom-[calc(var(--composer-h,9rem)+0.5rem)]" />
+                <MessageScrollerButton className="!bottom-4" />
               </MessageScroller>
             </MessageScrollerProvider>
 
             <div
               ref={composerDockRef}
-              className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background to-background/0 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-4"
+              className="relative shrink-0 bg-background pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]"
             >
-              <div className="pointer-events-auto">{composer}</div>
+              {composer}
             </div>
           </>
         )}

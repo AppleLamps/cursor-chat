@@ -121,12 +121,18 @@ describe("ChatApp", () => {
     });
     expect(sent.turnId).toMatch(/^[A-Za-z0-9_-]+$/);
 
-    // Keep the latest message close to the composer, including its measured height.
+    // The transcript and dock are flex siblings: no overlay or guessed reservation.
     const viewport = view.container.querySelector('[data-slot="message-scroller-viewport"]');
-    expect(viewport?.className).toContain("pb-[calc(var(--composer-h,10rem)+0.5rem)]");
-    const dock = view.getByRole("textbox").closest("form")?.parentElement?.parentElement;
-    expect(dock?.className).toContain("pt-3");
-    expect(dock?.className).not.toContain("sm:pt-12");
+    expect(viewport?.className).toContain("pb-2");
+    expect(viewport?.className).not.toContain("--composer-h");
+    const scroller = view.container.querySelector('[data-slot="message-scroller"]');
+    expect(scroller?.className).toContain("basis-0");
+    expect(scroller?.className).toContain("min-h-0");
+    const dock = view.getByRole("textbox").closest("form")?.parentElement;
+    expect(dock?.previousElementSibling).toBe(scroller);
+    expect(dock?.className).toContain("shrink-0");
+    expect(dock?.className).not.toContain("absolute");
+    expect(dock?.className).toContain("safe-area-inset-bottom");
 
     // 4. The conversation is saved for the next visit, without the API key.
     await waitFor(() => {

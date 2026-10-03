@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, RefObject, useLayoutEffect } from "react";
-import { ImageIcon, LinkIcon, MicIcon, PaperclipIcon, SendIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, ImageIcon, LinkIcon, MicIcon, PaperclipIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
+import { DropdownMenu } from "radix-ui";
 import type { ImageAttachment, PdfAttachment } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,11 +66,26 @@ export default function Composer({
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [value, inputRef]);
 
+  // Reflow a wrapped draft when the viewport or sidebar changes width, too.
+  useLayoutEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea || typeof ResizeObserver === "undefined") return;
+    let width = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === width) return;
+      width = textarea.clientWidth;
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [inputRef]);
+
   return (
     <form onSubmit={onSubmit} className="mx-auto max-w-3xl">
-      <div className="rounded-[1.375rem] border border-border bg-card p-1.5 shadow-lg shadow-foreground/10 transition focus-within:border-ring sm:rounded-2xl sm:p-2">
+      <div className="rounded-3xl border border-border bg-card p-1.5 shadow-sm transition focus-within:border-ring sm:p-2">
         {images.length > 0 || pdfs.length > 0 ? (
-          <AttachmentGroup className="px-2 pb-3 pt-1">
+          <AttachmentGroup className="max-h-36 px-2 pb-2 pt-1 [@media(max-height:500px)]:max-h-24">
             {images.map((image) => (
               <Attachment
                 key={image.id}
@@ -77,7 +93,7 @@ export default function Composer({
                 className="w-28 overflow-hidden"
                 title={image.name}
               >
-                <AttachmentMedia variant="image" className="h-24">
+                <AttachmentMedia variant="image" className="h-16 [@media(max-height:500px)]:h-10">
                   <img src={image.url} alt={image.name} />
                 </AttachmentMedia>
                 <AttachmentContent>
@@ -117,51 +133,62 @@ export default function Composer({
             ))}
           </AttachmentGroup>
         ) : null}
-        <textarea
-          ref={inputRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          rows={1}
-          enterKeyHint="enter"
-          autoCapitalize="sentences"
-          className="max-h-40 min-h-[50px] w-full resize-none bg-transparent px-3.5 py-3 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-44 sm:px-4 [@media(max-height:500px)]:max-h-20"
-        />
-        <div className="flex items-center justify-between px-2 pb-1 pt-1">
-          <div className="flex items-center gap-1.5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={onAttachClick}
-              disabled={isSending || isReadingFiles}
-              aria-label="Add image"
-              title="Attach PNG, JPEG, WebP, or GIF"
-              className="max-md:size-11 max-md:[&_svg:not([class*='size-'])]:size-5"
-            >
-              {isReadingFiles ? <PaperclipIcon className="animate-pulse" /> : <ImageIcon />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onHostedImageClick}
-              disabled={isSending || isReadingFiles}
-              title="Attach hosted image URL"
-              className="max-md:h-11 max-md:px-3.5 max-md:text-sm"
-            >
-              <LinkIcon />
-              URL
-            </Button>
-          </div>
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-end gap-1" data-slot="composer-input-row">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                aria-label="Add attachment"
+                title="Add attachment"
+                disabled={isSending || isReadingFiles}
+                className="size-11 shrink-0 rounded-full"
+              >
+                {isReadingFiles ? <PaperclipIcon className="animate-pulse" /> : <PlusIcon />}
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="z-50 min-w-52 rounded-xl border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
+              >
+                <DropdownMenu.Item
+                  onSelect={onAttachClick}
+                  className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 outline-none focus:bg-accent"
+                >
+                  <ImageIcon className="size-4" /> Add image
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  onSelect={onHostedImageClick}
+                  className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 outline-none focus:bg-accent"
+                >
+                  <LinkIcon className="size-4" /> Image from URL
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+          <textarea
+            ref={inputRef}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            aria-label={placeholder}
+            rows={1}
+            enterKeyHint="enter"
+            autoCapitalize="sentences"
+            className="max-h-40 min-h-11 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground sm:max-h-44 [@media(max-height:500px)]:max-h-20"
+          />
+          <div className="flex shrink-0 items-center gap-0.5">
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
               onClick={onToggleVoice}
-              className="hidden sm:inline-flex"
+              className="hidden size-11 rounded-full max-md:size-11 sm:inline-flex"
               aria-label={isListening ? "Stop voice input" : "Start voice input"}
               title={isListening ? "Stop voice input" : "Start voice input"}
             >
@@ -174,7 +201,7 @@ export default function Composer({
                 onClick={onStop}
                 aria-label="Stop generating"
                 title="Stop generating"
-                className="h-11 w-11 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 md:h-10 md:w-10"
+                className="size-11 shrink-0 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30"
               >
                 <SquareIcon className="fill-current" />
               </Button>
@@ -184,15 +211,15 @@ export default function Composer({
                 size="icon-lg"
                 disabled={!canSend}
                 aria-label="Send message"
-                className="h-11 w-11 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground md:h-10 md:w-10"
+                className="size-11 shrink-0 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30 disabled:bg-muted disabled:text-muted-foreground"
               >
-                <SendIcon />
+                <ArrowUpIcon />
               </Button>
             )}
           </div>
         </div>
       </div>
-      <p className="mt-1.5 text-center text-[11px] leading-4 text-muted-foreground sm:mt-2 [@media(max-height:500px)]:hidden">
+      <p className={`mt-1.5 text-center text-[11px] leading-4 text-muted-foreground ${note ? "" : "[@media(max-height:500px)]:hidden"}`}>
         {note || "AI can make mistakes. Check important info."}
       </p>
     </form>

@@ -198,3 +198,139 @@ describe("MessageBubble compact sources", () => {
     expect(view.getAllByRole("link")).toHaveLength(153);
   });
 });
+
+describe("MessageBubble unified answer footer", () => {
+  const answer = {
+    id: "answer-with-artifacts",
+    role: "assistant" as const,
+    content: "The exported report is ready.",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    sources: ["src/report.ts"]
+  };
+  const artifactScope = {
+    apiKey: "test-key",
+    conversation: {
+      id: "conversation",
+      title: "Report",
+      createdAt: answer.createdAt,
+      updatedAt: answer.createdAt,
+      messages: [],
+      agentId: "agent-1",
+      agentSessionToken: "session-1",
+      repoUrl: "https://github.com/acme/widgets"
+    }
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps controls in one wrapping row and expands panels after the footer, outside the bubble", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      artifacts: [{ path: "reports/result.csv", sizeBytes: 2048, updatedAt: answer.createdAt }]
+    })));
+    vi.stubGlobal("fetch", fetch);
+    const view = render(
+      <MessageBubble
+        message={answer}
+        repoUrl={artifactScope.conversation.repoUrl}
+        copied={false}
+        canRegenerate
+        onCopy={() => {}}
+        onRetry={() => {}}
+        artifactScope={artifactScope}
+      />
+    );
+    const sources = view.getByRole("button", { name: "Sources (1)" });
+    const artifacts = view.getByRole("button", { name: "Artifacts" });
+    const copy = view.getByRole("button", { name: "Copy answer" });
+    const retry = view.getByRole("button", { name: "Retry answer" });
+    const footer = sources.closest('[data-slot="message-footer"]');
+    expect(footer?.className).toContain("flex-wrap");
+    for (const control of [sources, artifacts, copy, retry]) {
+      expect(control.closest('[data-slot="message-footer"]')).toBe(footer);
+      expect(control.className).toContain("min-h-11");
+    }
+    expect(view.queryByText("Assistant")).toBeNull();
+    expect(footer?.querySelector("time")?.getAttribute("datetime")).toBe(answer.createdAt);
+    expect(fetch).not.toHaveBeenCalled();
+
+    fireEvent.click(sources);
+    fireEvent.click(artifacts);
+    const sourceList = view.getByRole("list", { name: "Source files" });
+    const artifactPanel = view.getByRole("region", { name: "Artifacts" });
+    expect(sourceList.parentElement).toBe(footer?.parentElement);
+    expect(artifactPanel.parentElement).toBe(footer?.parentElement);
+    expect(sourceList.closest('[data-slot="bubble-content"]')).toBeNull();
+    expect((footer?.compareDocumentPosition(sourceList) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(artifacts.getAttribute("aria-controls")).toBe(artifactPanel.id);
+    expect(artifacts.getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() => expect(view.getByRole("button", { name: "Download reports/result.csv" })).toBeTruthy());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/artifacts");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      apiKey: "test-key", agentId: "agent-1", agentSessionToken: "session-1",
+      repoUrl: "https://github.com/acme/widgets", branch: "main", agentMode: "qa",
+      model: { id: "composer-2.5" }
+    });
+
+    artifacts.focus();
+    fireEvent.click(artifacts);
+    expect(artifacts.getAttribute("aria-expanded")).toBe("false");
+    expect(view.queryByRole("region", { name: "Artifacts" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Download reports/result.csv" })).toBeNull();
+    expect(document.activeElement).toBe(artifacts);
+    fireEvent.click(artifacts);
+    expect(view.getByRole("button", { name: "Download reports/result.csv" })).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces artifact failures and lets the reader retry without losing the disclosure", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "The agent is unavailable." }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ artifacts: [] })));
+    vi.stubGlobal("fetch", fetch);
+    const view = render(
+      <MessageBubble message={answer} copied={false} onCopy={() => {}} onRetry={() => {}} artifactScope={artifactScope} />
+    );
+    const toggle = view.getByRole("button", { name: "Artifacts" });
+    fireEvent.click(toggle);
+    expect(view.getByRole("status").textContent).toBe("Loading artifacts…");
+    await waitFor(() => expect(view.getByRole("alert").textContent).toBe("The agent is unavailable."));
+    fireEvent.click(view.getByRole("button", { name: "Retry loading artifacts" }));
+    await waitFor(() => expect(view.getByText("No artifacts are available.")).toBeTruthy());
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(view.getByRole("region", { name: "Artifacts" }).getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("can collapse artifacts while loading and reopens with the completed results", async () => {
+    let resolveResponse: (response: Response) => void = () => {};
+    const fetch = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveResponse = resolve; }));
+    vi.stubGlobal("fetch", fetch);
+    const view = render(
+      <MessageBubble message={answer} copied={false} onCopy={() => {}} onRetry={() => {}} artifactScope={artifactScope} />
+    );
+    const toggle = view.getByRole("button", { name: "Artifacts" });
+    fireEvent.click(toggle);
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(toggle);
+    resolveResponse(new Response(JSON.stringify({ artifacts: [] })));
+    await waitFor(() => expect(view.container.querySelector('[role="region"]')?.getAttribute("aria-busy")).toBe("false"));
+    expect(view.queryByRole("region", { name: "Artifacts" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(view.getByText("No artifacts are available.")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps artifact and answer actions unavailable while streaming or on errors", () => {
+    const view = render(
+      <MessageBubble message={{ ...answer, streaming: true }} copied={false} canRegenerate onCopy={() => {}} onRetry={() => {}} artifactScope={artifactScope} />
+    );
+    expect(view.queryByRole("button", { name: "Artifacts" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Copy answer" })).toBeNull();
+    expect(view.queryByRole("button", { name: "Retry answer" })).toBeNull();
+    view.rerender(
+      <MessageBubble message={{ ...answer, error: true }} copied={false} canRegenerate onCopy={() => {}} onRetry={() => {}} artifactScope={artifactScope} />
+    );
+    expect(view.queryByRole("button", { name: /Sources|Artifacts|Copy answer|Retry answer/ })).toBeNull();
+  });
+});

@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /**
- * Callback ref for the element that floats over the bottom of the message list.
- * Publishes its live height as `--composer-h` on its parent so the list can pad
- * itself by exactly that much, however tall the composer grows.
+ * Measures the in-flow composer dock for the floating undo notification.
+ * Transcript height is allocated by flexbox, so it never needs a matching
+ * padding reservation or depends on this measurement to avoid being covered.
  */
 export function useComposerDock() {
   const observerRef = useRef<ResizeObserver | null>(null);

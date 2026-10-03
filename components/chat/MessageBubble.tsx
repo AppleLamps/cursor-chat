@@ -2,10 +2,12 @@
 
 import { memo, useId, useState } from "react";
 import {
+  CheckIcon,
   ChevronDownIcon,
   CopyIcon,
   FileTextIcon,
   GitPullRequestIcon,
+  PackageIcon,
   RefreshCwIcon
 } from "lucide-react";
 import { DEFAULT_BRANCH } from "@/lib/defaults";
@@ -60,6 +62,12 @@ function MessageBubble({
   };
 }) {
   const isUser = message.role === "user";
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [artifactsRequested, setArtifactsRequested] = useState(false);
+  const sourcesId = useId();
+  const artifactsId = useId();
+  const artifactsTriggerId = useId();
   const imageAttachments = message.imageAttachments || [];
   const pdfAttachments = message.pdfAttachments || [];
   const hasImageAttachments = imageAttachments.length > 0;
@@ -151,21 +159,116 @@ function MessageBubble({
                 </a>
               </Button>
             ) : null}
-            {!isUser && !message.error && message.sources?.length ? (
+            {!isUser && hasPdfAttachments ? (
+              <PdfAttachmentGroup attachments={pdfAttachments} align="start" compact />
+            ) : null}
+          </BubbleContent>
+        </Bubble>
+
+        {isUser ? (
+          <MessageFooter className="gap-2">
+            <span>{roleLabel(message.role)}</span>
+            <span aria-hidden="true">/</span>
+            <time dateTime={message.createdAt}>{timeLabel(message.createdAt)}</time>
+          </MessageFooter>
+        ) : (
+          <>
+            <MessageFooter className="w-full max-w-3xl flex-wrap gap-x-1 gap-y-0.5 px-0">
+              {!message.error && message.sources?.length ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="min-h-11 gap-1.5 md:min-h-7"
+                  onClick={() => setSourcesOpen((current) => !current)}
+                  aria-expanded={sourcesOpen}
+                  aria-controls={sourcesOpen ? sourcesId : undefined}
+                >
+                  <FileTextIcon aria-hidden="true" />
+                  Sources ({message.sources.length})
+                  <ChevronDownIcon
+                    aria-hidden="true"
+                    className={`transition ${sourcesOpen ? "rotate-180" : ""}`}
+                  />
+                </Button>
+              ) : null}
+              {!message.error && !isStreaming && artifactScope?.apiKey &&
+              artifactScope.conversation.agentId &&
+              artifactScope.conversation.agentSessionToken &&
+              artifactScope.conversation.repoUrl ? (
+                <Button
+                  id={artifactsTriggerId}
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="min-h-11 gap-1.5 md:min-h-7"
+                  onClick={() => {
+                    setArtifactsRequested(true);
+                    setArtifactsOpen((current) => !current);
+                  }}
+                  aria-expanded={artifactsOpen}
+                  aria-controls={artifactsRequested ? artifactsId : undefined}
+                >
+                  <PackageIcon aria-hidden="true" />
+                  Artifacts
+                  <ChevronDownIcon
+                    aria-hidden="true"
+                    className={`transition ${artifactsOpen ? "rotate-180" : ""}`}
+                  />
+                </Button>
+              ) : null}
+              {!message.error && !isStreaming ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="min-h-11 min-w-11 md:min-h-7 md:min-w-7"
+                    aria-label={copied ? "Copied answer" : "Copy answer"}
+                    title={copied ? "Copied" : "Copy answer"}
+                    onClick={() => onCopy(message)}
+                  >
+                    {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
+                  </Button>
+                  {canRegenerate ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="min-h-11 min-w-11 md:min-h-7 md:min-w-7"
+                      aria-label="Retry answer"
+                      title="Retry answer"
+                      onClick={() => onRetry(message.id)}
+                    >
+                      <RefreshCwIcon aria-hidden="true" />
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+              <span className="ml-auto inline-flex min-h-7 items-center gap-2 whitespace-nowrap pl-2 text-[11px] font-normal text-muted-foreground/75">
+                {!message.error && tokenUsageLabel ? (
+                  <span title={tokenUsageTitle || undefined}>{tokenUsageLabel}</span>
+                ) : null}
+                <time dateTime={message.createdAt} title={new Date(message.createdAt).toLocaleString()}>
+                  {timeLabel(message.createdAt)}
+                </time>
+              </span>
+            </MessageFooter>
+            {!message.error && sourcesOpen && message.sources?.length ? (
               <SourcesPanel
+                id={sourcesId}
                 sources={message.sources}
                 repoUrl={repoUrl}
                 branch={branch || DEFAULT_BRANCH}
               />
             ) : null}
-            {!isUser &&
-            !message.error &&
-            !isStreaming &&
-            artifactScope?.apiKey &&
-            artifactScope.conversation.agentId &&
-            artifactScope.conversation.agentSessionToken &&
-            artifactScope.conversation.repoUrl ? (
+            {!message.error && !isStreaming && artifactsRequested &&
+            artifactScope?.apiKey && artifactScope.conversation.agentId &&
+            artifactScope.conversation.agentSessionToken && artifactScope.conversation.repoUrl ? (
               <ArtifactsPanel
+                id={artifactsId}
+                labelledBy={artifactsTriggerId}
+                open={artifactsOpen}
                 scope={{
                   apiKey: artifactScope.apiKey,
                   agentId: artifactScope.conversation.agentId,
@@ -173,49 +276,14 @@ function MessageBubble({
                   repoUrl: artifactScope.conversation.repoUrl,
                   branch: artifactScope.conversation.branch || DEFAULT_BRANCH,
                   agentMode: artifactScope.conversation.agentMode || "qa",
-                  model:
-                    artifactScope.conversation.model || {
-                      id: artifactScope.conversation.modelId || "composer-2.5"
-                    }
+                  model: artifactScope.conversation.model || {
+                    id: artifactScope.conversation.modelId || "composer-2.5"
+                  }
                 }}
               />
             ) : null}
-            {!isUser && hasPdfAttachments ? (
-              <PdfAttachmentGroup attachments={pdfAttachments} align="start" compact />
-            ) : null}
-          </BubbleContent>
-        </Bubble>
-
-        <MessageFooter className="flex-wrap gap-x-2 gap-y-0.5 [&>*]:whitespace-nowrap">
-          <span>{roleLabel(message.role)}</span>
-          <span aria-hidden="true">/</span>
-          <time>{timeLabel(message.createdAt)}</time>
-          {!isUser && !message.error && tokenUsageLabel ? (
-            <>
-              <span aria-hidden="true">/</span>
-              <span title={tokenUsageTitle || undefined}>{tokenUsageLabel}</span>
-            </>
-          ) : null}
-          {!isUser && !message.error && !isStreaming ? (
-            <span className="inline-flex items-center gap-1 transition sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-within:opacity-100">
-              <Button type="button" variant="ghost" size="xs" onClick={() => onCopy(message)}>
-                <CopyIcon />
-                {copied ? "Copied" : "Copy"}
-              </Button>
-              {canRegenerate ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => onRetry(message.id)}
-                >
-                  <RefreshCwIcon />
-                  Retry
-                </Button>
-              ) : null}
-            </span>
-          ) : null}
-        </MessageFooter>
+          </>
+        )}
       </MessageContent>
     </MessageRow>
   );
@@ -259,62 +327,44 @@ function PdfAttachmentGroup({
 }
 
 function SourcesPanel({
+  id,
   sources,
   repoUrl,
   branch
 }: {
+  id: string;
   sources: string[];
   repoUrl?: string;
   branch: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const listId = useId();
-
   return (
-    <div className="mt-2 border-t border-border">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex min-h-11 w-full items-center justify-between text-left text-xs text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 md:min-h-7"
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-      >
-        <span className="font-medium">Sources ({sources.length})</span>
-        <ChevronDownIcon
-          aria-hidden="true"
-          className={`h-4 w-4 transition ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open ? (
-        <ul
-          id={listId}
-          aria-label="Source files"
-          tabIndex={0}
-          className="mt-1 max-h-40 space-y-1 overflow-y-auto overscroll-contain rounded-sm pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:max-h-48"
-        >
-          {sources.map((path) => {
-            const href = repoUrl ? githubBlobUrl(repoUrl, branch, path) : null;
+    <ul
+      id={id}
+      aria-label="Source files"
+      tabIndex={0}
+      className="w-full max-w-3xl max-h-40 overflow-y-auto overscroll-contain rounded-lg border border-border bg-muted/20 px-3 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:max-h-48"
+    >
+      {sources.map((path) => {
+        const href = repoUrl ? githubBlobUrl(repoUrl, branch, path) : null;
 
-            return (
-              <li key={path} className="font-mono text-xs text-muted-foreground">
-                {href ? (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="break-all underline-offset-4 hover:underline"
-                  >
-                    {path}
-                  </a>
-                ) : (
-                  <span className="break-all">{path}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-    </div>
+        return (
+          <li key={path} className="font-mono text-xs text-muted-foreground">
+            {href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="flex min-h-11 items-center break-all rounded-sm py-1 underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 md:min-h-7"
+              >
+                {path}
+              </a>
+            ) : (
+              <span className="block break-all py-1">{path}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
