@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   backupCorruptHistory,
   isQuotaError,
@@ -134,6 +134,8 @@ describe("persistHistory", () => {
 });
 
 describe("backupCorruptHistory", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   function fakeStorage(initial: Record<string, string> = {}) {
     const data = new Map(Object.entries(initial));
     return {
@@ -165,6 +167,55 @@ describe("backupCorruptHistory", () => {
     expect(storage.data.has("history-corrupt-1")).toBe(false);
     expect(storage.data.get("other")).toBe("keep");
     expect([...storage.data.keys()].filter((k) => k.includes("corrupt"))).toHaveLength(1);
+  });
+
+  it("does not delete the original or any previous backups when the new backup write fails", () => {
+    const initial = {
+      history: "{broken",
+      "history-corrupt-1": "old backup",
+      "history-corrupt-2": "another backup",
+      other: "keep"
+    };
+    const storage = fakeStorage(initial);
+    const removeItem = vi.spyOn(storage, "removeItem");
+    vi.spyOn(storage, "setItem").mockImplementation(() => {
+      throw new QuotaError();
+    });
+
+    expect(backupCorruptHistory(storage, "history", "{broken")).toBe(false);
+
+    expect(Object.fromEntries(storage.data)).toEqual(initial);
+    expect(removeItem).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a previous backup created at the same timestamp", () => {
+    vi.spyOn(Date, "now").mockReturnValue(123);
+    const storage = fakeStorage({
+      "history-corrupt-123": "old backup",
+      "history-corrupt-123-1": "another backup"
+    });
+    // Failed cleanup must leave all three copies intact.
+    vi.spyOn(storage, "removeItem").mockImplementation(() => {
+      throw new Error("Cannot remove old backup");
+    });
+
+    expect(backupCorruptHistory(storage, "history", "new backup")).toBe(true);
+
+    expect(storage.data.get("history-corrupt-123")).toBe("old backup");
+    expect(storage.data.get("history-corrupt-123-1")).toBe("another backup");
+    expect(storage.data.get("history-corrupt-123-2")).toBe("new backup");
+  });
+
+  it("reports success once the backup is saved even when stale-backup cleanup fails", () => {
+    const storage = fakeStorage({ "history-corrupt-1": "old backup" });
+    vi.spyOn(storage, "removeItem").mockImplementation(() => {
+      throw new Error("Cannot remove old backup");
+    });
+
+    expect(backupCorruptHistory(storage, "history", "new backup")).toBe(true);
+
+    expect([...storage.data.values()]).toContain("new backup");
+    expect(storage.data.get("history-corrupt-1")).toBe("old backup");
   });
 
   it("does nothing for an empty value", () => {

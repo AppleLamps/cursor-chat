@@ -20,17 +20,20 @@ type Stream = {
 const streams: Stream[] = [];
 const cancelBodies: Record<string, unknown>[] = [];
 let cancelResponses: number[] = [];
+let cancelOverride: (() => Promise<Response>) | undefined;
 
 function installFetch() {
   streams.length = 0;
   cancelBodies.length = 0;
   cancelResponses = [200];
+  cancelOverride = undefined;
 
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url === "/api/chat/cancel") {
       cancelBodies.push(JSON.parse(String(init?.body)));
+      if (cancelOverride) return cancelOverride();
       const status = cancelResponses.length > 1 ? cancelResponses.shift()! : cancelResponses[0];
-      return new Response("{}", { status });
+      return new Response(JSON.stringify({ cancelled: true, runId: cancelBodies.at(-1)?.runId }), { status });
     }
 
     const encoder = new TextEncoder();
@@ -184,11 +187,16 @@ describe("Stop", () => {
     await waitFor(() =>
       expect(result.current.composerNote).toMatch(/Could not confirm the run was cancelled/)
     );
-    // A 403 will not improve on retry.
+    // Failure leaves both the transport and the retryable Stop control live.
     expect(cancelBodies).toHaveLength(1);
-    await act(async () => {
-      await sending;
-    });
+    expect(streams[0].signal?.aborted).toBe(false);
+    expect(result.current.isSending).toBe(true);
+    expect(result.current.error).toBeNull();
+    cancelResponses = [200];
+    act(() => result.current.stopGenerating());
+    await act(async () => { await sending; });
+    expect(cancelBodies).toHaveLength(2);
+    expect(streams[0].signal?.aborted).toBe(true);
   });
 
   it("retries a transient cancel failure once before giving up", async () => {
@@ -212,6 +220,148 @@ describe("Stop", () => {
     await act(async () => {
       await sending;
     });
+  });
+
+  it("keeps streaming until cancellation is confirmed and deduplicates repeated Stop", async () => {
+    let confirm!: (response: Response) => void;
+    cancelOverride = () => new Promise((resolve) => { confirm = resolve; });
+    const { result } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("hello"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("run", { agentId: "agent-1", runId: "run-1" });
+    });
+    act(() => {
+      result.current.stopGenerating();
+      result.current.stopGenerating();
+    });
+    expect(cancelBodies).toHaveLength(1);
+    expect(streams[0].signal?.aborted).toBe(false);
+    expect(result.current.isSending).toBe(true);
+    expect(result.current.composerNote).not.toContain("stopped");
+    await act(async () => {
+      confirm(Response.json({ cancelled: true, runId: "run-1" }));
+      await sending;
+    });
+    expect(streams[0].signal?.aborted).toBe(true);
+    expect(result.current.composerNote).toContain("stopped");
+  });
+
+  it("rejects a success response without confirmation of this run", async () => {
+    cancelOverride = async () => Response.json({ cancelled: true, runId: "other-run" });
+    const { result, replace } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("hello"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("run", { agentId: "agent-1", runId: "run-1" });
+    });
+    act(() => result.current.stopGenerating());
+    await waitFor(() => expect(result.current.composerNote).toMatch(/Could not confirm/));
+    expect(streams[0].signal?.aborted).toBe(false);
+    await act(async () => { streams[0].close(); await sending; });
+    expect(lastSavedMessages(replace).at(-1)).toMatchObject({
+      error: true, recoverable: true, runId: "run-1"
+    });
+    expect(lastSavedMessages(replace).at(-1)?.content).not.toContain("stopped");
+    expect(result.current.composerNote).toBeNull();
+  });
+
+  it("preserves recovery if both cancellation attempts and then the stream fail", async () => {
+    cancelOverride = async () => { throw new TypeError("Network unavailable"); };
+    const { result, replace } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("hello"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("run", { agentId: "agent-1", runId: "run-1" });
+    });
+    act(() => result.current.stopGenerating());
+    await waitFor(() => expect(result.current.composerNote).toMatch(/Could not confirm/), { timeout: 3000 });
+    expect(cancelBodies).toHaveLength(2);
+    expect(streams[0].signal?.aborted).toBe(false);
+    await act(async () => { streams[0].close(); await sending; });
+    expect(lastSavedMessages(replace).at(-1)).toMatchObject({
+      error: true, recoverable: true, runId: "run-1"
+    });
+  });
+
+  it("records a confirmed cancellation even when the stream drops before its response", async () => {
+    let confirm!: (response: Response) => void;
+    cancelOverride = () => new Promise((resolve) => { confirm = resolve; });
+    const { result, replace } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("hello"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("run", { agentId: "agent-1", runId: "run-1" });
+    });
+    act(() => result.current.stopGenerating());
+    await act(async () => { streams[0].close(); });
+    expect(result.current.isSending).toBe(true);
+    await act(async () => {
+      confirm(Response.json({ cancelled: true, runId: "run-1" }));
+      await sending;
+    });
+    expect(lastSavedMessages(replace).at(-1)).toMatchObject({
+      content: "Agent run stopped.", recoverable: false, runId: "run-1"
+    });
+    expect(result.current.composerNote).toBe("Agent run stopped.");
+  });
+
+  it("does not let a late cancellation response abort a newer request", async () => {
+    let confirm!: (response: Response) => void;
+    cancelOverride = () => new Promise((resolve) => { confirm = resolve; });
+    const { result } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("first"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("run", { agentId: "agent-1", runId: "run-1" });
+    });
+    act(() => result.current.stopGenerating());
+    await act(async () => {
+      streams[0].push("done", { agentId: "agent-1", runId: "run-1", status: "finished", result: "Finished" });
+      streams[0].close();
+      await sending;
+    });
+    act(() => { sending = result.current.sendMessage("second"); });
+    await waitFor(() => expect(streams).toHaveLength(2));
+    await act(async () => {
+      streams[1].push("run", { agentId: "agent-1", runId: "run-2" });
+      confirm(Response.json({ cancelled: true, runId: "run-1" }));
+    });
+    expect(streams[1].signal?.aborted).toBe(false);
+    expect(result.current.isSending).toBe(true);
+    expect(result.current.composerNote).toBeNull();
+    await act(async () => {
+      streams[1].push("done", { agentId: "agent-1", runId: "run-2", status: "finished", result: "Done" });
+      streams[1].close();
+      await sending;
+    });
+  });
+
+  it("stays attached past the startup wait limit and cancels a late run ID", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = setup();
+      let sending!: Promise<void>;
+      await act(async () => { sending = result.current.sendMessage("hello"); });
+      act(() => result.current.stopGenerating());
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_001); });
+      expect(streams[0].signal?.aborted).toBe(false);
+      expect(result.current.isSending).toBe(true);
+      expect(result.current.composerNote).toMatch(/Cancellation is still pending/);
+      await act(async () => {
+        streams[0].push("run", { agentId: "agent-1", runId: "late-run" });
+        await sending;
+      });
+      expect(cancelBodies.at(-1)?.runId).toBe("late-run");
+      expect(streams[0].signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps what had streamed and does not offer to re-attach after a deliberate stop", async () => {

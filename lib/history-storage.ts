@@ -91,8 +91,8 @@ const CORRUPT_BACKUP_SUFFIX = "-corrupt";
 
 /**
  * Keep an unreadable history instead of deleting it, so a bad record or a
- * version mismatch cannot silently wipe someone's chats. Only the newest
- * backup is kept.
+ * version mismatch cannot silently wipe someone's chats. Older backups are
+ * removed only after the new copy has been stored successfully.
  */
 export function backupCorruptHistory(
   storage: Pick<Storage, "setItem" | "removeItem" | "length" | "key">,
@@ -101,18 +101,34 @@ export function backupCorruptHistory(
 ) {
   if (!raw) return false;
 
+  const stale: string[] = [];
   try {
     const prefix = `${key}${CORRUPT_BACKUP_SUFFIX}-`;
-    const stale: string[] = [];
     for (let index = 0; index < storage.length; index += 1) {
       const name = storage.key(index);
       if (name?.startsWith(prefix)) stale.push(name);
     }
-    stale.forEach((name) => storage.removeItem(name));
 
-    storage.setItem(`${prefix}${Date.now()}`, raw);
-    return true;
+    // Multiple failures can occur in one millisecond. Never overwrite an
+    // existing backup before the new copy has been saved.
+    const base = `${prefix}${Date.now()}`;
+    const existing = new Set(stale);
+    let backupKey = base;
+    let suffix = 1;
+    while (existing.has(backupKey)) backupKey = `${base}-${suffix++}`;
+
+    storage.setItem(backupKey, raw);
   } catch {
     return false;
   }
+
+  // Cleanup is best effort: its failure does not undo a successful backup.
+  for (const name of stale) {
+    try {
+      storage.removeItem(name);
+    } catch {
+      // Retaining an extra recovery copy is safer than discarding the new one.
+    }
+  }
+  return true;
 }

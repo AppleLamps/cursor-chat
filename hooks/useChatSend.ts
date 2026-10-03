@@ -96,7 +96,7 @@ function recoveryFor(
     : { turnId: uid() };
 }
 
-/** How long Stop waits for the run id before giving up on a clean cancel. */
+/** How long Stop waits before warning that agent startup is taking a while. */
 const STOP_WAIT_FOR_RUN_MS = 20_000;
 /** Heartbeat so a reload can tell a live reply from an abandoned one. */
 const MESSAGE_HEARTBEAT_MS = 10_000;
@@ -112,10 +112,14 @@ async function requestRunCancel(apiKey: string, run: ActiveRunIdentity) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey, ...run }),
-        keepalive: true
+        keepalive: true,
+        signal: AbortSignal.timeout(10_000)
       });
 
-      if (response.ok) return true;
+      if (response.ok) {
+        const result = await response.json();
+        return result.cancelled === true && result.runId === run.runId;
+      }
 
       // Auth/validation failures will not improve on a second try.
       const transient = response.status === 408 || response.status === 429 || response.status >= 500;
@@ -153,6 +157,9 @@ export function useChatSend({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const activeRunRef = useRef<ActiveRunIdentity | null>(null);
+  const cancellingRunRef = useRef<ActiveRunIdentity | null>(null);
+  const cancelledRunIdRef = useRef<string | null>(null);
+  const cancellationPromiseRef = useRef<Promise<void> | null>(null);
   // Synchronous guards: state lags a render, so two quick taps could both pass.
   const isSendingRef = useRef(false);
   const stopRequestedRef = useRef(false);
@@ -169,21 +176,29 @@ export function useChatSend({
     }
   }, []);
 
-  // The UI stops immediately; the cancel request runs on its own and any
-  // failure is reported instead of silently claiming the run stopped.
+  // Keep the stream and Stop control attached until the server confirms cancel.
+  // A late response must never abort a newer request or overwrite its status.
   const cancelRunAndAbort = useCallback(
     (run: ActiveRunIdentity) => {
-      stopRequest();
-      setComposerNote("Agent run stopped.");
+      if (cancellingRunRef.current === run) return;
+      cancellingRunRef.current = run;
+      setComposerNote("Stopping... confirming cancellation with Cursor.");
 
-      if (!apiKey) return;
-      void requestRunCancel(apiKey, run).then((cancelled) => {
-        if (!cancelled) {
-          setComposerNote(
-            "Could not confirm the run was cancelled. It may still finish in Cursor."
-          );
+      cancellationPromiseRef.current = (apiKey ? requestRunCancel(apiKey, run) : Promise.resolve(false)).then(
+        (cancelled) => {
+          if (cancellingRunRef.current === run) cancellingRunRef.current = null;
+          if (activeRunRef.current !== run) return;
+          if (cancelled) {
+            cancelledRunIdRef.current = run.runId;
+            setComposerNote("Agent run stopped.");
+            stopRequest();
+          } else {
+            setComposerNote(
+              "Could not confirm the run was cancelled. It may still be running and using your Cursor account. Still connected; press Stop to retry."
+            );
+          }
         }
-      });
+      );
     },
     [apiKey, stopRequest]
   );
@@ -193,7 +208,6 @@ export function useChatSend({
 
     const activeRun = activeRunRef.current;
     if (activeRun) {
-      activeRunRef.current = null;
       cancelRunAndAbort(activeRun);
       return;
     }
@@ -206,13 +220,11 @@ export function useChatSend({
     stopWaitTimerRef.current = window.setTimeout(() => {
       stopWaitTimerRef.current = null;
       if (!stopRequestedRef.current) return;
-      stopRequestedRef.current = false;
-      stopRequest();
       setComposerNote(
-        "Stopped waiting. The agent may still finish in Cursor."
+        "Cancellation is still pending while the agent starts. Staying connected so it can be cancelled when its run ID arrives."
       );
     }, STOP_WAIT_FOR_RUN_MS);
-  }, [cancelRunAndAbort, stopRequest]);
+  }, [cancelRunAndAbort]);
 
   const sendMessage = useCallback(
     async (
@@ -293,6 +305,7 @@ export function useChatSend({
       setComposerNote(null);
       isSendingRef.current = true;
       stopRequestedRef.current = false;
+      cancelledRunIdRef.current = null;
       setIsSending(true);
       setExternalSyncPaused(true);
 
@@ -460,7 +473,6 @@ export function useChatSend({
               stopRequestedRef.current = false;
               clearStopWait();
               const run = activeRunRef.current;
-              activeRunRef.current = null;
               if (run) cancelRunAndAbort(run);
             }
           },
@@ -491,6 +503,7 @@ export function useChatSend({
             mergeSourceForConversation(conversationId, assistantId, path);
           },
           onDone: (payload) => {
+            activeRunRef.current = null;
             resolvedAgentId = payload.agentId;
             if (payload.agentSessionToken) {
               resolvedAgentSessionToken = payload.agentSessionToken;
@@ -562,11 +575,20 @@ export function useChatSend({
           );
         }
       } catch (caught) {
+        // A dropped stream does not settle a cancellation already in flight.
+        // Wait for its bounded result before deciding whether Retry reconnects.
+        if (activeRunRef.current && cancellingRunRef.current === activeRunRef.current) {
+          await cancellationPromiseRef.current;
+        }
         const wasAborted =
           requestController.signal.aborted ||
           (caught instanceof DOMException && caught.name === "AbortError");
-        const message = wasAborted
+        const wasCancelled = Boolean(assistantRunId) &&
+          cancelledRunIdRef.current === assistantRunId;
+        const message = wasCancelled
           ? "Agent run stopped."
+          : wasAborted
+            ? "Disconnected from the agent. The run may still be active; reconnect to check it."
           : caught instanceof Error
             ? caught.message
             : "Something went wrong.";
@@ -594,7 +616,8 @@ export function useChatSend({
           // Only a lost connection leaves a run worth re-attaching to; a failed
           // or cancelled run would just replay the same failure.
           recoverable:
-            !wasAborted && Boolean(failedRunId) && isRecoverableStreamFailure(caught),
+            !wasCancelled && Boolean(failedRunId) &&
+            (wasAborted || isRecoverableStreamFailure(caught)),
           requestId:
             caught instanceof ChatStreamError ? caught.requestId : undefined,
           turnId
@@ -602,6 +625,7 @@ export function useChatSend({
         const finalMessages = [...optimisticMessages, errorMessage];
         if (activeConversationIdRef.current === conversationId) {
           setError(message);
+          setComposerNote(wasCancelled ? "Agent run stopped." : null);
         }
         replaceMessagesForConversation(
           conversationId,

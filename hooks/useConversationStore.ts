@@ -64,6 +64,8 @@ const STORAGE_BLOCKED_WARNING =
   "This browser is blocking site storage, so your chats will be lost when you close the tab.";
 const STORAGE_UNREADABLE_WARNING =
   "Your saved chats could not be read. A backup copy was kept in this browser.";
+const STORAGE_PRESERVED_WARNING =
+  "Your saved chats could not be read or backed up. The original history was left untouched, and new chats will not be saved in this tab.";
 
 async function parseStoredConversations(raw: string | null) {
   const decoded = decodeConversationStorage(raw);
@@ -87,6 +89,9 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
   const [hasHydrated, setHasHydrated] = useState(false);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
   const seededDefaultConversationRef = useRef(false);
+  // UI hydration can finish without safely reading or backing up saved data.
+  // Keep every save path disabled until replacing that data is safe.
+  const persistenceAllowedRef = useRef(false);
   const persistenceRunRef = useRef(0);
   const persistTimerRef = useRef<number | null>(null);
   const externalSyncPausedRef = useRef(false);
@@ -142,6 +147,7 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
 
         if (cancelled) return;
 
+        persistenceAllowedRef.current = true;
         tombstonesRef.current = saved.tombstones;
         if (saved.conversations.length > 0) {
           dispatch({
@@ -153,13 +159,10 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
       } catch {
         if (!cancelled) {
           // Keep what we could not read before the next save replaces it.
+          // If the backup fails, the original remains the only recovery copy.
           const kept = backupCorruptHistory(window.localStorage, STORAGE_KEY, raw);
-          try {
-            window.localStorage.removeItem(STORAGE_KEY);
-          } catch {
-            // Nothing more to do.
-          }
-          setStorageWarning(kept ? STORAGE_UNREADABLE_WARNING : STORAGE_BLOCKED_WARNING);
+          persistenceAllowedRef.current = kept;
+          setStorageWarning(kept ? STORAGE_UNREADABLE_WARNING : STORAGE_PRESERVED_WARNING);
         }
       } finally {
         if (!cancelled) setHasHydrated(true);
@@ -174,6 +177,8 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
   }, []);
 
   const persistNow = useCallback(async () => {
+    if (!persistenceAllowedRef.current) return;
+
     const run = persistenceRunRef.current + 1;
     persistenceRunRef.current = run;
 
@@ -181,7 +186,7 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
       const { conversations: serialized, activeImageKeys } =
         await serializeConversationsForStorage(stateRef.current.conversations);
 
-      if (persistenceRunRef.current !== run) return;
+      if (!persistenceAllowedRef.current || persistenceRunRef.current !== run) return;
 
       const outcome = persistHistory(
         window.localStorage,
@@ -214,7 +219,7 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
   // Save shortly after the last change rather than on every streamed token and
   // keystroke: the whole history is one JSON string, so each save is O(history).
   useEffect(() => {
-    if (!hasHydrated) return;
+    if (!hasHydrated || !persistenceAllowedRef.current) return;
 
     if (persistTimerRef.current !== null) {
       window.clearTimeout(persistTimerRef.current);
@@ -232,6 +237,8 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
 
     window.clearTimeout(persistTimerRef.current);
     persistTimerRef.current = null;
+
+    if (!persistenceAllowedRef.current) return;
 
     try {
       const { conversations, pendingWrites } = serializeConversationsSync(

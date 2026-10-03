@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConversationStore } from "@/hooks/useConversationStore";
 import { createConversation, INTERRUPTED_NOTE } from "@/lib/chat-conversation";
 import { STORAGE_KEYS } from "@/lib/storage";
+import * as attachmentStorage from "@/lib/chat-attachment-storage";
 import type { Conversation, Message } from "@/lib/chat-types";
 
 const KEY = STORAGE_KEYS.CONVERSATIONS;
@@ -161,6 +162,159 @@ describe("loading history", () => {
     );
     expect(backupKey).toBeDefined();
     expect(window.localStorage.getItem(backupKey!)).toBe("{this is not json");
+  });
+
+  it("allows new history to be saved after the unreadable original is safely backed up", async () => {
+    const original = "{this is not json";
+    window.localStorage.setItem(KEY, original);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { result } = renderHook(() => useConversationStore({ apiKey: "key" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const backupKey = Object.keys(window.localStorage).find((key) =>
+      key.startsWith(`${KEY}-corrupt-`)
+    );
+    expect(backupKey).toBeDefined();
+    expect(window.localStorage.getItem(KEY)).toBe(original);
+    act(() => result.current.createAndActivateConversation(chat("new-chat")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+
+    expect(JSON.parse(window.localStorage.getItem(KEY)!).conversations[0].id).toBe("new-chat");
+    expect(window.localStorage.getItem(backupKey!)).toBe(original);
+  });
+
+  it("does not overwrite unread history when the initial storage read fails", async () => {
+    seed([chat("original")]);
+    const original = window.localStorage.getItem(KEY);
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementationOnce(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const pruneImages = vi.spyOn(attachmentStorage, "pruneStoredImages");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { result, unmount } = renderHook(() => useConversationStore({ apiKey: "key" }));
+
+    expect(result.current.hasHydrated).toBe(true);
+    expect(result.current.storageWarning).toMatch(/blocking site storage/i);
+    getItem.mockRestore();
+    act(() => result.current.createAndActivateConversation(chat("new-chat")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    unmount();
+
+    expect(window.localStorage.getItem(KEY)).toBe(original);
+    expect(historyWrites(setItem)).toHaveLength(0);
+    expect(pruneImages).not.toHaveBeenCalled();
+  });
+
+  it.each(["debounce", "pagehide", "visibilitychange", "unmount"] as const)(
+    "preserves unreadable history and its previous backup when backup fails, including %s saves",
+    async (saveTrigger) => {
+      const original = "{this is not json";
+      const previousBackupKey = `${KEY}-corrupt-1`;
+      window.localStorage.setItem(KEY, original);
+      window.localStorage.setItem(previousBackupKey, "previous unreadable history");
+      const originalSetItem = Storage.prototype.setItem;
+      const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string
+      ) {
+        // Replacing the original would fit, but creating a backup does not.
+        if (key.startsWith(`${KEY}-corrupt-`)) {
+          throw new DOMException("full", "QuotaExceededError");
+        }
+        originalSetItem.call(this, key, value);
+      });
+      const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+      const serialize = vi.spyOn(attachmentStorage, "serializeConversationsForStorage");
+      const serializeSync = vi.spyOn(attachmentStorage, "serializeConversationsSync");
+      const writeImages = vi.spyOn(attachmentStorage, "writePendingImages");
+      const pruneImages = vi.spyOn(attachmentStorage, "pruneStoredImages");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+      const { result, unmount } = renderHook(() => useConversationStore({ apiKey: "key" }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(result.current.hasHydrated).toBe(true);
+      expect(result.current.storageWarning).toMatch(/original history.*untouched/i);
+      expect(result.current.storageWarning).toMatch(/new chats will not be saved/i);
+      expect(window.localStorage.getItem(KEY)).toBe(original);
+      expect(window.localStorage.getItem(previousBackupKey)).toBe("previous unreadable history");
+
+      act(() => {
+        result.current.dismissStorageWarning();
+        result.current.createAndActivateConversation(chat("new-chat"));
+      });
+      expect(result.current.conversations).toHaveLength(1);
+
+      if (saveTrigger === "debounce") {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(700);
+        });
+      } else if (saveTrigger === "unmount") {
+        unmount();
+      } else if (saveTrigger === "visibilitychange") {
+        vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+        act(() => document.dispatchEvent(new Event("visibilitychange")));
+      } else {
+        act(() => window.dispatchEvent(new Event("pagehide")));
+      }
+
+      expect(window.localStorage.getItem(KEY)).toBe(original);
+      expect(window.localStorage.getItem(previousBackupKey)).toBe("previous unreadable history");
+      expect(historyWrites(setItem)).toHaveLength(0);
+      expect(removeItem).not.toHaveBeenCalled();
+      expect(serialize).not.toHaveBeenCalled();
+      expect(serializeSync).not.toHaveBeenCalled();
+      expect(writeImages).not.toHaveBeenCalled();
+      expect(pruneImages).not.toHaveBeenCalled();
+    }
+  );
+
+  it("also disables persistence when valid history cannot be hydrated or backed up", async () => {
+    seed([chat("original")]);
+    const original = window.localStorage.getItem(KEY);
+    vi.spyOn(attachmentStorage, "hydrateConversationsFromStorage").mockRejectedValueOnce(
+      new Error("Could not hydrate saved attachments")
+    );
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (key.startsWith(`${KEY}-corrupt-`)) {
+        throw new DOMException("denied", "SecurityError");
+      }
+      originalSetItem.call(this, key, value);
+    });
+    const pruneImages = vi.spyOn(attachmentStorage, "pruneStoredImages");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { result, unmount } = renderHook(() => useConversationStore({ apiKey: "key" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.hasHydrated).toBe(true);
+    act(() => result.current.createAndActivateConversation(chat("new-chat")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    act(() => window.dispatchEvent(new Event("pagehide")));
+    unmount();
+
+    expect(window.localStorage.getItem(KEY)).toBe(original);
+    expect(historyWrites(setItem)).toHaveLength(0);
+    expect(pruneImages).not.toHaveBeenCalled();
   });
 
   it("survives one malformed message without losing the rest of the conversation", async () => {
