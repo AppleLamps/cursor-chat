@@ -1,4 +1,5 @@
 import type { AgentTraceEntry } from "@/lib/agent-activity";
+import type { ImplementationOutcome } from "@/lib/implementation";
 import type { AgentMode, ModelId } from "@/lib/defaults";
 import type { ModelSelection } from "@/lib/model-client";
 
@@ -44,6 +45,9 @@ export type Message = {
   trace?: AgentTraceEntry[];
   sources?: string[];
   prUrl?: string;
+  implementation?: ImplementationOutcome;
+  /** Agent before launch, absent when the turn created a new agent. */
+  launchAgentId?: string;
   runId?: string;
   requestId?: string;
   durationMs?: number;

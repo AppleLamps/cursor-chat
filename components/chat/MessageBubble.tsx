@@ -18,6 +18,8 @@ import { githubBlobUrl } from "@/lib/sources";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
 import AgentTrace from "@/components/chat/AgentTrace";
 import ArtifactsPanel from "@/components/chat/ArtifactsPanel";
+import ImplementationPanel from "@/components/chat/ImplementationPanel";
+import { safePullRequestUrl } from "@/lib/implementation";
 import type { Conversation } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,6 +60,7 @@ function MessageBubble({
   onRetry: (messageId: string) => void;
   artifactScope?: {
     apiKey: string;
+    githubToken?: string | null;
     conversation: Conversation;
   };
 }) {
@@ -151,7 +154,7 @@ function MessageBubble({
                 <MarkerContent className="shimmer">{message.activity}</MarkerContent>
               </Marker>
             ) : null}
-            {!isUser && !message.error && message.prUrl ? (
+            {!isUser && !message.implementation && !message.error && safePullRequestUrl(message.prUrl, repoUrl) ? (
               <Button asChild variant="outline" size="sm" className="mt-4">
                 <a href={message.prUrl} target="_blank" rel="noreferrer">
                   <GitPullRequestIcon />
@@ -159,6 +162,7 @@ function MessageBubble({
                 </a>
               </Button>
             ) : null}
+            {!isUser && message.implementation ? <ImplementationPanel outcome={message.implementation} scope={artifactScope} /> : null}
             {!isUser && hasPdfAttachments ? (
               <PdfAttachmentGroup attachments={pdfAttachments} align="start" compact />
             ) : null}

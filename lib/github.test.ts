@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GitHubApiError, listGitHubBranches } from "@/lib/github";
+import { GitHubApiError, listGitHubBranches, getGitHubPullRequest } from "@/lib/github";
 
 const fetchMock = vi.fn();
 
@@ -19,6 +19,43 @@ afterEach(() => {
 function stub() {
   vi.stubGlobal("fetch", fetchMock);
 }
+
+describe("read-only GitHub PR verification", () => {
+  const repo = "https://github.com/acme/app";
+  const pr = { html_url: `${repo}/pull/7`, state: "open", merged: false, draft: false,
+    head: { ref: "cursor/task" }, base: { ref: "main", repo: { html_url: repo } } };
+  it.each([ [false, false, "open", "open"], [false, true, "open", "draft"], [false, false, "closed", "closed"],
+    [true, false, "closed", "merged"] ])("verifies actual PR state", async (merged, draft, state, expected) => {
+    stub();
+    fetchMock.mockResolvedValueOnce(json({ ...pr, merged, draft, state })).mockResolvedValueOnce(json([
+      { filename: "src/app.ts", status: "modified", additions: 2, deletions: 1 }
+    ]));
+    const result = await getGitHubPullRequest(repo, `${repo}/pull/7`, "synthetic-token");
+    expect(result).toMatchObject({ state: expected, base: "main", head: "cursor/task", files: [{ path: "src/app.ts", additions: 2 }] });
+    expect(fetchMock.mock.calls.every(([, init]) => !init.method || init.method === "GET")).toBe(true);
+    expect(fetchMock.mock.calls.every(([url, init]) => url.startsWith("https://api.github.com/repos/acme/app/pulls/7") && init.redirect === "error")).toBe(true);
+  });
+  it("rejects unrelated PR before making authenticated requests", async () => {
+    stub();
+    await expect(getGitHubPullRequest(repo, "https://github.com/other/app/pull/7", "token")).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([401, 403, 404, 429])("makes GitHub access failure %s actionable", async (status) => {
+    stub(); fetchMock.mockResolvedValue(json({}, { status }));
+    await expect(getGitHubPullRequest(repo, `${repo}/pull/7`)).rejects.toBeInstanceOf(GitHubApiError);
+  });
+  it("caps changed files and marks incomplete coverage", async () => {
+    stub();
+    fetchMock.mockResolvedValueOnce(json({ ...pr, changed_files: 350 }));
+    fetchMock.mockImplementation(async () => json(Array.from({ length: 100 }, (_, index) => ({ filename: `src/${index}`, status: "added", additions: 1, deletions: 0 })),
+      { headers: { link: '<https://evil.test/token>; rel="next"' } }));
+    const result = await getGitHubPullRequest(repo, `${repo}/pull/7`, "token");
+    expect(result.files).toHaveLength(300);
+    expect(result.filesTruncated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.every(([url]) => url.startsWith("https://api.github.com/repos/acme/app/pulls/7"))).toBe(true);
+  });
+});
 
 describe("listGitHubBranches", () => {
   it("lists branches with the default first", async () => {

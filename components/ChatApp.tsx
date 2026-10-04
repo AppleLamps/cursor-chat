@@ -134,9 +134,9 @@ export default function ChatApp({
   const artifactScope = useMemo(
     () =>
       conversations.activeConversation && auth.apiKey
-        ? { apiKey: auth.apiKey, conversation: conversations.activeConversation }
+        ? { apiKey: auth.apiKey, githubToken: auth.githubToken, conversation: conversations.activeConversation }
         : undefined,
-    [auth.apiKey, conversations.activeConversation]
+    [auth.apiKey, auth.githubToken, conversations.activeConversation]
   );
 
   const voice = useVoiceInput({
@@ -173,6 +173,7 @@ export default function ChatApp({
     setInput("");
     attachments.clearPendingAttachments();
     chat.setError(null);
+    chat.setComposerNote(null);
     inputRef.current?.focus();
   }
 
@@ -188,6 +189,19 @@ export default function ChatApp({
     }
 
     if (repoPickerMode === "change" && conversations.activeConversation) {
+      const current = conversations.activeConversation;
+      if (current.repoUrl === repoUrl && (current.branch || DEFAULT_BRANCH) === branch &&
+          JSON.stringify(resolveConversationModel(current)) === JSON.stringify(model)) {
+        setRepoPickerOpen(false);
+        return;
+      }
+      if (conversations.messages.length || chat.isSending) {
+        // Keep old transcripts, cloud context and in-flight callbacks together.
+        activateConversation(createConversation(repoUrl, branch, agentMode, model.id, model));
+        setRepoPickerOpen(false);
+        chat.setError(null);
+        return;
+      }
       conversations.updateConversationRepo(
         conversations.activeConversation.id,
         repoUrl,
@@ -455,6 +469,7 @@ export default function ChatApp({
         onKeyDown={handleKeyDown}
         canSend={canSend}
         isSending={chat.isSending}
+        canStop={chat.canStop}
         onStop={chat.stopGenerating}
         isReadingFiles={attachments.isReadingFiles}
         isListening={voice.isListening}

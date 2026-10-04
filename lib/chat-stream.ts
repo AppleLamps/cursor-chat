@@ -5,6 +5,7 @@ import {
 } from "@/lib/sse";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 import type { ChatTokenUsage } from "@/lib/chat-types";
+import type { ImplementationOutcome } from "@/lib/implementation";
 
 export type ChatStreamDone = {
   agentId: string;
@@ -69,6 +70,7 @@ export type ChatStreamHandlers = {
   onThinking?: (payload: { delta?: string; text?: string }) => void;
   onActivity?: (activity: string) => void;
   onSource?: (path: string) => void;
+  onImplementation?: (outcome: ImplementationOutcome) => void;
   onDone?: (payload: ChatStreamDone) => void;
 };
 
@@ -132,6 +134,14 @@ export async function consumeChatStream(
 
       for (const { event, data } of parsed.events) {
         switch (event) {
+          case "implementation": {
+            const outcome = data.outcome as ImplementationOutcome | undefined;
+            if (outcome && typeof outcome.agentId === "string" && typeof outcome.runId === "string" &&
+                ["running", "finished", "error", "cancelled"].includes(outcome.status) && Array.isArray(outcome.branches)) {
+              handlers.onImplementation?.(outcome);
+            }
+            break;
+          }
           case "run": {
             const agentId = data.agentId;
             const runId = data.runId;

@@ -146,6 +146,7 @@ export function conversationReducer(
       const current = state.conversations.find(
         (conversation) => conversation.id === action.id
       );
+      if (current?.messages.some((message) => message.streaming)) return state;
       if (
         current &&
         current.repoUrl === action.repoUrl &&
@@ -178,6 +179,7 @@ export function conversationReducer(
     }
 
     case "change-mode":
+      if (state.conversations.find((conversation) => conversation.id === action.id)?.messages.some((message) => message.streaming)) return state;
       return {
         ...state,
         conversations: sortConversations(
@@ -196,6 +198,7 @@ export function conversationReducer(
       };
 
     case "change-model":
+      if (state.conversations.find((conversation) => conversation.id === action.id)?.messages.some((message) => message.streaming)) return state;
       return {
         ...state,
         conversations: sortConversations(

@@ -20,7 +20,7 @@ const SIGNING_SECRET =
 const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 type AgentSessionClaims = {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   agentId: string;
   repoUrl: string;
   branch: string;
@@ -91,7 +91,7 @@ export function createAgentSessionToken(
 ) {
   const modelId = context.modelId || DEFAULT_MODEL_ID;
   const claims: AgentSessionClaims = {
-    v: 2,
+    v: 3,
     agentId: normalizeString(context.agentId),
     repoUrl: normalizeRepoUrl(context.repoUrl),
     branch: normalizeBranch(context.branch),
@@ -112,7 +112,8 @@ export function createAgentSessionToken(
 
 export function verifyAgentSessionToken(
   token: string | undefined,
-  expected: AgentSessionContext
+  expected: AgentSessionContext,
+  options: { observationOnly?: boolean } = {}
 ) {
   if (!token?.trim()) {
     return { valid: false as const, reason: "Missing agent session token." };
@@ -132,8 +133,13 @@ export function verifyAgentSessionToken(
     return { valid: false as const, reason: "Invalid agent session token." };
   }
 
-  if ((claims.v !== 1 && claims.v !== 2) || Date.now() > claims.expiresAt) {
+  if (![1, 2, 3].includes(claims.v) || !Number.isFinite(claims.expiresAt) || Date.now() > claims.expiresAt) {
     return { valid: false as const, reason: "Expired agent session token." };
+  }
+
+  // Older Implement sessions did not explicitly guarantee branch isolation.
+  if (!options.observationOnly && expected.agentMode === "implement" && claims.v !== 3) {
+    return { valid: false as const, reason: "Start a new Implement chat to use branch isolation." };
   }
 
   const expectedClaims = {
@@ -169,4 +175,11 @@ export function verifyAgentSessionToken(
   }
 
   return { valid: true as const };
+}
+
+/** Stable private identity when a launch response is lost before the run ID. */
+export function agentIdForTurn(apiKey: string, turnId: string, scope = "") {
+  const hex = createHmac("sha256", SIGNING_SECRET)
+    .update(JSON.stringify([apiKeyHash(apiKey), turnId, scope])).digest("hex");
+  return `bc-${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }

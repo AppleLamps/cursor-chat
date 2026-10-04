@@ -98,12 +98,74 @@ function setup(messages: Message[] = []) {
     setExternalSyncPaused: vi.fn()
   };
   const hook = renderHook(() => useChatSend(options));
-  return { ...hook, replace };
+  return { ...hook, replace, options };
 }
 
 function lastSavedMessages(replace: ReturnType<typeof vi.fn>): Message[] {
   return replace.mock.calls[replace.mock.calls.length - 1][1] as Message[];
 }
+
+describe("Implement recovery and conversation scope", () => {
+  it("retries a dropped launch with its original turn before a run ID exists", async () => {
+    const { result, replace, options, rerender } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("fix auth"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => {
+      streams[0].push("agent", { agentId: "allocated-agent", agentSessionToken: "session" });
+      streams[0].close(); await sending;
+    });
+    const saved = lastSavedMessages(replace);
+    expect(saved.at(-1)).toMatchObject({ error: true, recoverable: true });
+    options.messages = saved;
+    options.activeConversation = { ...conversation, messages: saved, agentId: "allocated-agent", agentSessionToken: "session" };
+    rerender();
+    act(() => result.current.retryAssistantMessage(saved.at(-1)!.id));
+    await waitFor(() => expect(streams).toHaveLength(2));
+    expect(streams[1].body.turnId).toBe(streams[0].body.turnId);
+    // Recreate the same private launch identity; never resume a handle that
+    // may not have been posted to Cursor yet.
+    expect(streams[1].body.agentId).toBeUndefined();
+    await act(async () => {
+      streams[1].push("done", { agentId: "allocated-agent", runId: "run", status: "finished", result: "Done" }); streams[1].close();
+    });
+  });
+
+  it("prevents Stop in chat B from cancelling chat A", async () => {
+    const { result, options, rerender } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("fix auth"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    await act(async () => { streams[0].push("run", { agentId: "agent-a", runId: "run-a" }); });
+    options.activeConversation = { ...conversation, id: "chat-b" };
+    options.activeConversationIdRef.current = "chat-b";
+    rerender();
+    expect(result.current.canStop).toBe(false);
+    expect(result.current.composerNote).toMatch(/another chat/);
+    act(() => result.current.stopGenerating());
+    expect(cancelBodies).toHaveLength(0);
+    await act(async () => {
+      streams[0].push("done", { agentId: "agent-a", runId: "run-a", status: "finished", result: "Done" }); streams[0].close(); await sending;
+    });
+  });
+
+  it("preserves a PR-only terminal outcome without inventing PR creation", async () => {
+    const { result, replace } = setup();
+    let sending!: Promise<void>;
+    act(() => { sending = result.current.sendMessage("fix auth"); });
+    await waitFor(() => expect(streams).toHaveLength(1));
+    const outcome = { agentId: "agent", runId: "run", status: "finished", startingRef: "main",
+      branches: [{ repoUrl: "https://github.com/acme/widgets", branch: "cursor/task", prUrl: "https://github.com/acme/widgets/pull/7" }] };
+    await act(async () => {
+      streams[0].push("implementation", { outcome });
+      streams[0].push("done", { agentId: "agent", runId: "run", status: "finished" });
+      streams[0].close(); await sending;
+    });
+    expect(lastSavedMessages(replace).at(-1)).toMatchObject({ implementation: outcome });
+    expect(lastSavedMessages(replace).at(-1)?.error).toBeUndefined();
+    expect(result.current.composerNote).not.toContain("Changes submitted");
+  });
+});
 
 beforeEach(() => {
   installFetch();

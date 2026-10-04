@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Agent } from "@cursor/sdk";
+import { Agent, CursorSdkError } from "@cursor/sdk";
 import { POST } from "@/app/api/chat/cancel/route";
 import { createAgentSessionToken } from "@/lib/agent-session";
 
 vi.mock("@cursor/sdk", () => ({
-  Agent: { cancelRun: vi.fn() },
+  Agent: { cancelRun: vi.fn(), getRun: vi.fn() },
   CursorSdkError: class CursorSdkError extends Error {},
   CursorAgentError: class CursorAgentError extends Error {}
 }));
@@ -33,6 +33,10 @@ describe("chat cancellation route", () => {
   beforeEach(() => {
     cancelRun.mockReset();
     cancelRun.mockResolvedValue(undefined);
+    vi.mocked(Agent.getRun).mockReset().mockResolvedValue({ agentId: "agent", status: "running" } as Awaited<ReturnType<typeof Agent.getRun>>);
+    cancelRun.mockImplementation(async () => {
+      vi.mocked(Agent.getRun).mockResolvedValue({ agentId: "agent", status: "cancelled" } as Awaited<ReturnType<typeof Agent.getRun>>);
+    });
   });
 
   it("cancels only the run bound to a valid agent session", async () => {
@@ -60,6 +64,29 @@ describe("chat cancellation route", () => {
 
     expect(response.status).toBe(409);
     expect(cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("does not claim an already finished run was cancelled", async () => {
+    vi.mocked(Agent.getRun).mockResolvedValue({ agentId: "agent", status: "finished" } as Awaited<ReturnType<typeof Agent.getRun>>);
+    const response = await POST(request({ ...requestBody, agentSessionToken: createAgentSessionToken(requestBody) }));
+    expect(await response.json()).toMatchObject({ cancelled: false, status: "finished" });
+    expect(cancelRun).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm cancellation until Cursor reports it", async () => {
+    cancelRun.mockResolvedValue(undefined);
+    const response = await POST(request({ ...requestBody, agentSessionToken: createAgentSessionToken(requestBody) }));
+    expect(await response.json()).toMatchObject({ cancelled: false, status: "running" });
+  });
+
+  it("reconciles a finish racing with the cancellation request", async () => {
+    cancelRun.mockImplementation(async () => {
+      vi.mocked(Agent.getRun).mockResolvedValue({ agentId: "agent", status: "finished" } as Awaited<ReturnType<typeof Agent.getRun>>);
+      throw Object.assign(new CursorSdkError("Run already ended"), { code: "run_not_cancellable", status: 409 });
+    });
+    const response = await POST(request({ ...requestBody, agentSessionToken: createAgentSessionToken(requestBody) }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ cancelled: false, status: "finished" });
   });
 
   it("still stops a run on a branch that Implement policy would now refuse", async () => {

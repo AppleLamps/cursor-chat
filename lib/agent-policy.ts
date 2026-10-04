@@ -19,16 +19,6 @@ type PolicyAllow = {
   allowed: true;
 };
 
-const DEFAULT_PROTECTED_BRANCHES = [
-  "main",
-  "master",
-  "prod",
-  "production",
-  "release",
-  "release/*",
-  "hotfix/*"
-];
-
 function parseList(value: string | undefined) {
   return (value || "")
     .split(",")
@@ -111,21 +101,6 @@ function isBranchAllowed(branch: string) {
   );
 }
 
-function isProtectedBranch(branch: string) {
-  if (process.env.ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES === "true") {
-    return false;
-  }
-
-  // The env list adds to the defaults: replacing them would let a deployment
-  // that only wants to protect `staging` accidentally unprotect `main`.
-  const protectedBranches = [
-    ...DEFAULT_PROTECTED_BRANCHES,
-    ...parseList(process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES)
-  ];
-
-  return matchesAny(protectedBranches, shortBranchName(branch));
-}
-
 export function validateAgentPolicy({
   agentMode,
   repoUrl,
@@ -161,15 +136,8 @@ export function validateAgentPolicy({
     };
   }
 
-  if (isProtectedBranch(branch)) {
-    return {
-      allowed: false,
-      status: 403,
-      error:
-        "Implement mode is blocked on protected branches. Create a feature branch and try again."
-    };
-  }
-
+  // The selected branch is a starting ref, never a direct write target.
+  // The route explicitly uses workOnCurrentBranch:false, including for main.
   if (!isFollowUp && implementConfirmed !== true) {
     return {
       allowed: false,

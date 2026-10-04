@@ -1,4 +1,5 @@
 import { validateRepoUrl } from "@/lib/validate";
+import { canonicalRepoUrl, safePullRequestUrl, type PullRequestDetails } from "@/lib/implementation";
 
 export type GitHubRepoRef = {
   owner: string;
@@ -38,12 +39,55 @@ async function githubFetch(url: string, headers: Record<string, string>) {
   try {
     return await fetch(url, {
       headers,
+      redirect: "error",
       cache: "no-store",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
   } catch {
     throw new GitHubApiError("GitHub did not respond in time. Try again.", 504);
   }
+}
+
+/** Read-only PR status and the PR's cumulative changed files (not this turn's edits). */
+export async function getGitHubPullRequest(repoUrl: string, prUrl: string, token?: string): Promise<PullRequestDetails> {
+  const url = safePullRequestUrl(prUrl, repoUrl);
+  const ref = parseGitHubRepoUrl(repoUrl);
+  if (!url || !ref) throw new GitHubApiError("The PR does not belong to this repository.", 400);
+  const number = Number(url.split("/").at(-1));
+  const prefix = `${GITHUB_API_ORIGIN}/repos/${ref.owner}/${ref.repo}/pulls/${number}`;
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json", "User-Agent": "Codebase-Chat", "X-GitHub-Api-Version": "2022-11-28",
+    ...(token?.trim() ? { Authorization: `Bearer ${token.trim()}` } : {})
+  };
+  const response = await githubFetch(prefix, headers);
+  if (!response.ok) throw failureFor(response, "Could not verify the pull request with GitHub.", "PR not found or GitHub access is missing. Connect a GitHub token with read access to this repository, including SSO approval.");
+  const pr = await response.json();
+  if (safePullRequestUrl(pr.html_url, repoUrl) !== url ||
+      canonicalRepoUrl(pr.base?.repo?.html_url ?? "") !== canonicalRepoUrl(repoUrl) ||
+      typeof pr.head?.ref !== "string" || typeof pr.base?.ref !== "string" ||
+      !["open", "closed"].includes(pr.state)) {
+    throw new GitHubApiError("GitHub returned unexpected pull request metadata.", 502);
+  }
+  const files: PullRequestDetails["files"] = [];
+  let filesTruncated = false;
+  for (let page = 1; page <= 3; page++) {
+    const fileResponse = await githubFetch(`${prefix}/files?per_page=100&page=${page}`, headers);
+    if (!fileResponse.ok) throw failureFor(fileResponse, "Could not load changed files from GitHub.");
+    const entries = await fileResponse.json();
+    if (!Array.isArray(entries)) throw new GitHubApiError("GitHub returned unexpected changed files.", 502);
+    for (const file of entries) {
+      if (typeof file.filename === "string" && typeof file.status === "string" &&
+          Number.isSafeInteger(file.additions) && Number.isSafeInteger(file.deletions)) {
+        files.push({ path: file.filename, status: file.status, additions: file.additions, deletions: file.deletions });
+      }
+    }
+    const hasNext = Boolean(parseGitHubNextLink(fileResponse.headers.get("link")));
+    if (!hasNext) break;
+    if (page === 3) filesTruncated = true;
+  }
+  filesTruncated ||= typeof pr.changed_files === "number" && pr.changed_files > files.length;
+  return { url, number, state: pr.merged ? "merged" : pr.state === "closed" ? "closed" : pr.draft ? "draft" : "open",
+    head: pr.head.ref, base: pr.base.ref, files, filesTruncated };
 }
 
 function failureFor(response: Response, fallback: string, notFound?: string) {

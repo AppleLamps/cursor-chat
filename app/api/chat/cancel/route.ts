@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     agentMode,
     modelId,
     modelParams: model.params
-  });
+  }, { observationOnly: true });
   if (!session.valid) {
     return NextResponse.json(
       { error: "This agent session is not authorized to cancel the run." },
@@ -72,12 +72,24 @@ export async function POST(request: Request) {
   }
 
   try {
-    await Agent.cancelRun(runId, {
+    const options = {
       runtime: "cloud",
       agentId,
       apiKey
-    });
-    return NextResponse.json({ cancelled: true, runId });
+    } as const;
+    const before = await Agent.getRun(runId, options);
+    if (before.agentId !== agentId) return NextResponse.json({ error: "Run does not belong to this agent." }, { status: 409 });
+    if (before.status === "running") {
+      try { await Agent.cancelRun(runId, options); }
+      catch (error) {
+        // A concurrent finish returns run_not_cancellable; read actual status.
+        if (!(error instanceof CursorSdkError) || error.code !== "run_not_cancellable") throw error;
+      }
+    }
+    const run = await Agent.getRun(runId, options);
+    if (run.agentId !== agentId) return NextResponse.json({ error: "Run does not belong to this agent." }, { status: 409 });
+    return NextResponse.json({ cancelled: run.status === "cancelled", status: run.status, runId },
+      { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof CursorSdkError) {
       return NextResponse.json(

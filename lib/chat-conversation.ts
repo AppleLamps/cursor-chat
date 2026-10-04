@@ -8,6 +8,7 @@ import {
   type ModelId
 } from "@/lib/defaults";
 import type { Conversation, Message, Role } from "@/lib/chat-types";
+import { safePullRequestUrl } from "@/lib/implementation";
 import {
   DEFAULT_MODEL_SELECTION,
   normalizeModelSelection,
@@ -107,10 +108,16 @@ export function latestUserMessage(messages: Message[]) {
   );
 }
 
-export function latestPrUrl(messages: Message[]) {
-  return [...messages]
+export function latestPrUrl(messages: Message[], repoUrl?: string, agentId?: string) {
+  const latestOutcome = [...messages].reverse().find((message) => message.implementation)?.implementation;
+  if (latestOutcome) {
+    if (agentId && latestOutcome.agentId !== agentId) return undefined;
+    return latestOutcome.branches.map((entry) => safePullRequestUrl(entry.prUrl, repoUrl)).find(Boolean);
+  }
+  const candidate = [...messages]
     .reverse()
     .find((message) => message.role === "assistant" && message.prUrl)?.prUrl;
+  return safePullRequestUrl(candidate, repoUrl);
 }
 
 export function conversationTranscript(
@@ -187,7 +194,7 @@ export function settleInterruptedMessage(
     ...message,
     streaming: false,
     error: true,
-    recoverable: Boolean(message.runId),
+    recoverable: Boolean(message.runId || message.turnId),
     activity: undefined,
     heartbeatAt: undefined,
     content: partial ? `${message.content}\n\n_${INTERRUPTED_NOTE}_` : INTERRUPTED_NOTE

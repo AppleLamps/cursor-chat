@@ -74,7 +74,7 @@ describe("conversationReducer", () => {
     const current = conversationReducer(state(), {
       type: "replace-messages",
       conversationId: "chat",
-      messages: [userMessage, assistantMessage],
+      messages: [userMessage, { ...assistantMessage, streaming: false }],
       agentId: "agent",
       agentSessionToken: "token"
     });

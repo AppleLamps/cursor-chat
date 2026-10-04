@@ -20,7 +20,7 @@ pull request creation.
 - **Streaming agent activity:** Follow responses, tool activity, sources, and
   reasoning summaries in real time over Server-Sent Events.
 - **Guarded implementation:** Explicit confirmation, signed agent sessions,
-  protected-branch rules, and optional deployment allowlists limit write-capable
+  separate working branches, and optional deployment allowlists limit write-capable
   runs.
 - **Rich chat experience:** Markdown, syntax-highlighted code, image
   attachments, source links, usage telemetry, and persistent local history.
@@ -156,7 +156,35 @@ access.
 5. `/api/chat` streams agent events to the browser over SSE.
 6. The browser stores the returned agent ID and signed session token for
    validated follow-up requests.
-7. Implement runs may return a pull request URL when Cursor creates one.
+7. Implement runs retain Cursor's current branch/PR metadata across terminal
+   states. The status panel verifies PR state and cumulative changed files using
+   read-only GitHub requests. Refresh status rechecks the same run, without
+   starting an agent or submitting a prompt.
+
+The selected branch is a **starting ref**, including `main`, rather than a direct
+write target. Implement explicitly sets `workOnCurrentBranch: false` and
+`autoCreatePR: true`. Follow-ups use `Agent.resume()` and `send()` on the same
+agent. An unavailable Implement agent produces an actionable error instead of
+silently starting fresh work without the original task/PR context. Changing a
+repository, starting ref, or model after messages exist creates a separate chat.
+
+A completed Cursor run does not prove that a PR was created, is open, or was
+merged. Cursor's Git metadata is current **per-agent state**, even when reading
+a historical run; the panel labels it accordingly and retains multiple branches.
+The verified PR base/head and open/draft/closed/merged state come from GitHub.
+Changed files are cumulative PR changes, capped at 300 with truncation indicated.
+Without a reported PR, changed files are unavailable; tool-read sources are not
+presented as edited files. Private PR verification requires a GitHub token with
+read access to Pull requests (and any required organization SSO approval).
+That token is never supplied to Cursor and cannot fix Cursor integration access.
+
+Dropped launch responses retry the original turn and private deterministic agent
+identity; known run IDs reconnect through `Agent.getRun()` without resubmitting
+the prompt. Stop checks authoritative status after cancellation and preserves a
+run that already finished. Existing run observation and cancellation remain
+available when deployment write policy changes. Older Implement session tokens
+may be observed/stopped, but new writes require a new chat under the explicit
+branch-isolation contract.
 
 The server acts as a stateless credential proxy. Cursor API keys are forwarded
 for each relevant request but are not stored server-side. Conversation history,
@@ -204,9 +232,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `ASKCURSOR_ENABLE_IMPLEMENT_MODE` | Set to `false` to disable Implement mode |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_OWNERS` | Comma-separated owner allowlist |
 | `ASKCURSOR_IMPLEMENT_ALLOWED_REPOS` | Comma-separated repository allowlist |
-| `ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES` | Comma-separated branch allowlist |
-| `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` | Extra protected-branch patterns, added to the defaults |
-| `ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES` | Set to `true` to permit protected branches |
+| `ASKCURSOR_IMPLEMENT_ALLOWED_BRANCHES` | Comma-separated starting-ref allowlist |
+
+The legacy `ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES` and
+`ASKCURSOR_ALLOW_PROTECTED_IMPLEMENT_BRANCHES` controls no longer gate starting
+refs. Direct writes to the selected ref are disabled in SDK configuration.
+Use the starting-ref allowlist to restrict allowed checkout origins.
 
 Allowlist values support `*` wildcards. See [.env.example](.env.example) for
 configuration notes and examples.
@@ -268,8 +299,9 @@ Key operational considerations:
   credentials or prompts.
 - Production rate limits use Redis and fail closed when durable request controls
   are unavailable.
-- Implement mode should be restricted to approved repositories and non-protected
-  branches.
+- Implement mode can be restricted to approved repositories and starting refs;
+  SDK-managed commits use a separate working branch. Target-repository hooks
+  and GitHub branch rules should also enforce write restrictions.
 - Browser or agent environments with privileged automation capabilities require
   an additional security and privacy review.
 

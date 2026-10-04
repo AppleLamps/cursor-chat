@@ -46,9 +46,9 @@ describe("validateAgentPolicy", () => {
     });
 
   it.each(["main", "MAIN", "refs/heads/main", "heads/main", "refs/heads/release/1.2"])(
-    "blocks protected branch spelling %s",
+    "allows protected starting ref %s because writes use a separate branch",
     (branch) => {
-      expect(implement(branch)).toMatchObject({ allowed: false, status: 403 });
+      expect(implement(branch)).toEqual({ allowed: true });
     }
   );
 
@@ -57,11 +57,11 @@ describe("validateAgentPolicy", () => {
     expect(implement("refs/heads/feature/x")).toEqual({ allowed: true });
   });
 
-  it("adds configured protected branches to the defaults instead of replacing them", () => {
+  it("does not confuse legacy protected write target settings with starting refs", () => {
     process.env.ASKCURSOR_IMPLEMENT_PROTECTED_BRANCHES = "staging";
 
-    expect(implement("staging")).toMatchObject({ allowed: false });
-    expect(implement("main")).toMatchObject({ allowed: false });
+    expect(implement("staging")).toEqual({ allowed: true });
+    expect(implement("main")).toEqual({ allowed: true });
     expect(implement("feature/x")).toEqual({ allowed: true });
   });
 

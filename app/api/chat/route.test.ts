@@ -149,6 +149,48 @@ describe("chat route validation and rate limiting", () => {
     expectNoQuotaCharged();
   });
 
+  it.each(["main", "feature/custom-base"])("launches Implement from %s on a separate branch", async (branch) => {
+    mockedAgentCreate.mockResolvedValue(mockAgent("composer-2.5"));
+    await (await POST(chatRequest({ apiKey: "key", prompt: "fix it", repoUrl: "https://github.com/acme/app",
+      branch, agentMode: "implement", implementConfirmed: true }))).text();
+    expect(mockedAgentCreate).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "agent", agentId: expect.stringMatching(/^bc-/),
+      cloud: { repos: [{ url: "https://github.com/acme/app", startingRef: branch }],
+        autoCreatePR: true, workOnCurrentBranch: false, skipReviewerRequest: true }
+    }));
+  });
+
+  it("uses stable creation identity and send key when the launch response is lost", async () => {
+    const agent = mockAgent("composer-2.5");
+    mockedAgentCreate.mockResolvedValue(agent);
+    const body = { apiKey: "key", prompt: "fix it", repoUrl: "https://github.com/acme/app", branch: "main",
+      agentMode: "implement", implementConfirmed: true, turnId: "same-turn" };
+    await (await POST(chatRequest(body))).text();
+    await (await POST(chatRequest(body))).text();
+    expect(mockedAgentCreate.mock.calls[0][0].agentId).toBe(mockedAgentCreate.mock.calls[1][0].agentId);
+    expect(vi.mocked(agent.send).mock.calls.map((call) => call[1]?.idempotencyKey)).toEqual(["agent:same-turn:send", "agent:same-turn:send"]);
+  });
+
+  it("retains scoped PR metadata even for a failed Implement run", async () => {
+    mockedAgentCreate.mockResolvedValue(mockAgent("composer-2.5", { status: "error", error: { message: "test failed" },
+      git: { branches: [{ repoUrl: "github.com/acme/app", branch: "cursor/change", prUrl: "https://github.com/acme/app/pull/7" }] } }));
+    const body = await (await POST(chatRequest({ apiKey: "key", prompt: "fix it", repoUrl: "https://github.com/acme/app", branch: "main",
+      agentMode: "implement", implementConfirmed: true }))).text();
+    expect(body).toContain('"prUrl":"https://github.com/acme/app/pull/7"');
+    expect(body).toContain('"status":"error"');
+    expect(body).not.toContain("event: done");
+  });
+
+  it("never silently replaces an unavailable Implement follow-up", async () => {
+    const { AgentNotFoundError } = await import("@cursor/sdk");
+    mockedAgentResume.mockRejectedValue(new AgentNotFoundError("missing"));
+    const scope = { apiKey: "key", agentId: "agent", repoUrl: "https://github.com/acme/app", branch: "main",
+      agentMode: "implement" as const, modelId: "composer-2.5" };
+    const body = await (await POST(chatRequest({ ...scope, prompt: "fix the test", agentSessionToken: createAgentSessionToken(scope) }))).text();
+    expect(body).toContain("no replacement agent was started");
+    expect(mockedAgentCreate).not.toHaveBeenCalled();
+  });
+
   it("uses the selected model for first runs", async () => {
     const agent = mockAgent("grok-4.5");
     mockedAgentCreate.mockResolvedValue(agent);
@@ -377,11 +419,11 @@ describe("chat route validation and rate limiting", () => {
     const body = await response.text();
 
     expect(mockedAgentCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ idempotencyKey: "client-turn:agent" })
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^bc-.*:agent$/) })
     );
     expect(agent.send).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ idempotencyKey: "client-turn:send" })
+      expect.objectContaining({ idempotencyKey: "agent:client-turn:send" })
     );
     expect(body).toContain("event: run");
     expect(body.indexOf("event: run")).toBeLessThan(body.indexOf("event: done"));
@@ -410,7 +452,8 @@ describe("chat route validation and rate limiting", () => {
     const body = await response.text();
 
     expect(body).toContain("event: error");
-    expect(body).toContain('"message":"Repository checkout failed."');
+    expect(body).toContain('"message":"Repository checkout failed.');
+    expect(body).toContain("Cursor Settings");
     expect(body).toContain('"code":"checkout_failed"');
     expect(body).not.toContain("failed before finishing");
     consoleError.mockRestore();

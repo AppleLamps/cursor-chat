@@ -56,9 +56,10 @@ export default function RepoRunOptions({
           </div>
           {isImplementMode(agentMode) ? (
             <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950">
-              The agent may modify this repository and open a PR when the task
-              requires code changes. Usage is billed to your Cursor account. The
-              repo must allow writes and must not use read-only Cursor hooks.
+              Cursor starts from the selected branch and works on a separate
+              branch. It may commit changes and open a PR. Follow-ups continue
+              the same agent workspace. Usage is billed to your Cursor account;
+              Cursor must have repository write access.
             </p>
           ) : null}
         </fieldset>

@@ -21,6 +21,7 @@ import {
   getModelCatalog,
   isAuthFailure,
   normalizeModelSelection,
+  modelSelectionKey,
   validateSelectionAgainstCatalog
 } from "@/lib/model-catalog";
 import {
@@ -38,6 +39,7 @@ import {
 } from "@/lib/rate-limit";
 import {
   createAgentSessionToken,
+  agentIdForTurn,
   verifyAgentSessionToken
 } from "@/lib/agent-session";
 import { validateAgentPolicy } from "@/lib/agent-policy";
@@ -47,6 +49,7 @@ import { ChatStreamEventName, formatSseEvent } from "@/lib/sse";
 import { trimmedString, validateBranch, validateRepoUrl } from "@/lib/validate";
 import { normalizeTokenUsage } from "@/lib/chat-telemetry";
 import type { TerminationReason } from "@/lib/agent-run-termination";
+import { cursorFailureMessage, implementationOutcome, safePullRequestUrl, canonicalRepoUrl } from "@/lib/implementation";
 
 // Opts the route into the longest duration available on Vercel Pro/Enterprise
 // (Hobby is capped at 300s; lower this back to 300 if deploying on Hobby). The
@@ -196,8 +199,9 @@ async function streamRunEvents(
   return telemetry;
 }
 
-function extractPrUrl(result: RunResult): string | undefined {
-  return result.git?.branches?.find((branch) => branch.prUrl)?.prUrl;
+function extractPrUrl(result: RunResult, repoUrl: string): string | undefined {
+  return result.git?.branches?.filter((entry) => canonicalRepoUrl(entry.repoUrl) === canonicalRepoUrl(repoUrl))
+    .map((entry) => safePullRequestUrl(entry.prUrl, repoUrl)).find(Boolean);
 }
 
 function modelIdFromResult(result: RunResult, run: Run) {
@@ -257,15 +261,17 @@ async function createCloudAgent(
   const cloudBase = {
     repos: [{ url: repoUrl, startingRef: branch }]
   };
+  const initialAgentId = agentIdForTurn(apiKey, turnId, JSON.stringify({ repoUrl: canonicalRepoUrl(repoUrl), branch, agentMode, model: modelSelectionKey(modelSelection) }));
 
   return Agent.create({
     apiKey,
+    agentId: initialAgentId,
     model: modelSelection,
     mode: sdkModeForAgentMode(agentMode),
-    idempotencyKey: `${turnId}:agent`,
+    idempotencyKey: `${initialAgentId}:agent`,
     cloud: isImplementMode(agentMode)
-      ? { ...cloudBase, autoCreatePR: true }
-      : { ...cloudBase, skipReviewerRequest: true }
+      ? { ...cloudBase, workOnCurrentBranch: false, autoCreatePR: true, skipReviewerRequest: true }
+      : { ...cloudBase, workOnCurrentBranch: false, autoCreatePR: false, skipReviewerRequest: true }
   });
 }
 
@@ -307,8 +313,8 @@ async function startFirstRun({
     sdkImages.length > 0 ? sdkImages : undefined
   );
 
-  const run = await agent.send(agentMessage, {
-    idempotencyKey: `${turnId}:send`,
+  const run = await sendAndDisposeOnFailure(agent, agentMessage, {
+    idempotencyKey: `${agent.agentId}:${turnId}:send`,
     mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
@@ -349,6 +355,9 @@ async function startFollowUpRun({
     });
   } catch (resumeError) {
     if (resumeError instanceof AgentNotFoundError) {
+      if (isImplementMode(agentMode)) {
+        throw new Error("The previous Implement agent is unavailable. Start a new chat with the full task and PR context; no replacement agent was started.");
+      }
       send("status", {
         message: "Previous agent unavailable. Starting a new cloud agent..."
       });
@@ -391,8 +400,8 @@ async function startFollowUpRun({
       ? { text: promptText, images: sdkImages }
       : promptText;
 
-  const run = await agent.send(agentMessage, {
-    idempotencyKey: `${turnId}:send`,
+  const run = await sendAndDisposeOnFailure(agent, agentMessage, {
+    idempotencyKey: `${agent.agentId}:${turnId}:send`,
     mode: sdkModeForAgentMode(agentMode),
     ...createStreamCallbacks(send, {
       onTextDelta: (delta) => {
@@ -408,6 +417,18 @@ async function startFollowUpRun({
     agent,
     streamedTextLength
   };
+}
+
+async function sendAndDisposeOnFailure(
+  agent: Awaited<ReturnType<typeof Agent.create>>,
+  message: Parameters<typeof agent.send>[0],
+  options: Parameters<typeof agent.send>[1]
+) {
+  try { return await agent.send(message, options); }
+  catch (error) {
+    await agent[Symbol.asyncDispose]().catch(() => undefined);
+    throw error;
+  }
 }
 
 async function recoverRun({
@@ -590,7 +611,7 @@ export async function POST(request: Request) {
     implementConfirmed: body.implementConfirmed === true
   });
 
-  if (!policy.allowed) {
+  if (!recoverRunId && !policy.allowed) {
     return NextResponse.json({ error: policy.error }, { status: policy.status });
   }
 
@@ -640,7 +661,7 @@ export async function POST(request: Request) {
       agentMode,
       modelId,
       modelParams: modelSelection.params
-    });
+    }, { observationOnly: Boolean(recoverRunId) });
 
     if (!session.valid) {
       return NextResponse.json(
@@ -819,6 +840,12 @@ export async function POST(request: Request) {
           agentSessionToken: resolvedAgentSessionToken,
           runId: started.run.id
         });
+        if (isImplementMode(agentMode)) {
+          send("implementation", { outcome: implementationOutcome(started.run.git, {
+            repoUrl, startingRef: branch, agentId: resolvedAgentId,
+            runId: started.run.id, status: started.run.status ?? "running"
+          }) });
+        }
 
         if (request.signal.aborted || streamClosed) {
           // The request may have been aborted (or the client cancelled the
@@ -870,6 +897,13 @@ export async function POST(request: Request) {
         const usage =
           normalizeTokenUsage(result.usage) ?? streamTelemetry.usage;
 
+        if (isImplementMode(agentMode)) {
+          send("implementation", { outcome: implementationOutcome(result.git, {
+            repoUrl, startingRef: branch, agentId: resolvedAgentId,
+            runId: result.id, status: result.status
+          }) });
+        }
+
         if (result.status === "error") {
           const runError =
             result.error?.message || "The Cursor agent run failed before finishing.";
@@ -885,7 +919,7 @@ export async function POST(request: Request) {
             branch
           });
           send("error", {
-            message: runError,
+            message: cursorFailureMessage({ message: runError, code: result.error?.code }),
             code: result.error?.code,
             runId: result.id,
             requestId
@@ -936,7 +970,7 @@ export async function POST(request: Request) {
           status: result.status,
           result: finalResult,
           thinking,
-          prUrl: extractPrUrl(result),
+          prUrl: extractPrUrl(result, repoUrl),
           requestId,
           usage,
           durationMs: result.durationMs ?? completedRun.durationMs,
@@ -956,8 +990,8 @@ export async function POST(request: Request) {
             branch
           });
           send("error", {
-            message: error.message,
-            retryable: error.isRetryable,
+            message: cursorFailureMessage(error),
+            retryable: error.isRetryable && (!error.status || error.status >= 500 || error.status === 408),
             code: error.code,
             status: error.status,
             requestId,
@@ -989,9 +1023,9 @@ export async function POST(request: Request) {
         clearTimeout(timeout);
         clearInterval(heartbeat);
         await terminationPromise;
-        await disposeAgent();
-        await releaseSlot();
-        closeStream();
+        try { await disposeAgent(); }
+        catch (error) { console.error("Failed to dispose Cursor client stream.", error); }
+        finally { await releaseSlot(); closeStream(); }
       }
     }
   });

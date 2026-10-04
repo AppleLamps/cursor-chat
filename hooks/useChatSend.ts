@@ -32,6 +32,7 @@ import { copyText } from "@/lib/clipboard";
 import { repoLabel } from "@/lib/repo";
 import { uniqueSortedSources } from "@/lib/sources";
 import { useAgentRequestController } from "@/hooks/useAgentRequestController";
+import type { ImplementationOutcome } from "@/lib/implementation";
 
 type UseChatSendOptions = {
   apiKey: string | null;
@@ -78,6 +79,7 @@ type ActiveRunIdentity = {
   modelId: string;
   model: ModelSelection;
 };
+type Recovery = Pick<Message, "runId" | "turnId" | "launchAgentId"> & { launchRetry?: boolean };
 
 /**
  * Retry re-attaches to the old run only when the connection was lost (the run
@@ -88,11 +90,12 @@ type ActiveRunIdentity = {
 function recoveryFor(
   assistantMessage: Message | undefined,
   userMessage: Message
-): Pick<Message, "runId" | "turnId"> {
+): Recovery {
   return assistantMessage?.error &&
     assistantMessage.recoverable &&
-    assistantMessage.runId
-    ? { runId: assistantMessage.runId, turnId: userMessage.turnId }
+    userMessage.turnId
+    ? { runId: assistantMessage.runId, turnId: userMessage.turnId,
+        launchRetry: !assistantMessage.runId, launchAgentId: assistantMessage.launchAgentId }
     : { turnId: uid() };
 }
 
@@ -118,7 +121,7 @@ async function requestRunCancel(apiKey: string, run: ActiveRunIdentity) {
 
       if (response.ok) {
         const result = await response.json();
-        return result.cancelled === true && result.runId === run.runId;
+        return result.runId === run.runId ? result.status ?? (result.cancelled ? "cancelled" : "running") : "running";
       }
 
       // Auth/validation failures will not improve on a second try.
@@ -131,7 +134,7 @@ async function requestRunCancel(apiKey: string, run: ActiveRunIdentity) {
     await new Promise((resolve) => setTimeout(resolve, 600));
   }
 
-  return false;
+  return "running";
 }
 
 export function useChatSend({
@@ -152,6 +155,8 @@ export function useChatSend({
   setExternalSyncPaused
 }: UseChatSendOptions) {
   const [isSending, setIsSending] = useState(false);
+  const [sendingConversationId, setSendingConversationId] = useState<string>();
+  const sendingConversationRef = useRef<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [composerNote, setComposerNote] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -182,29 +187,35 @@ export function useChatSend({
     (run: ActiveRunIdentity) => {
       if (cancellingRunRef.current === run) return;
       cancellingRunRef.current = run;
-      setComposerNote("Stopping... confirming cancellation with Cursor.");
+      if (activeConversationIdRef.current === sendingConversationRef.current) {
+        setComposerNote("Stopping... confirming cancellation with Cursor.");
+      }
 
-      cancellationPromiseRef.current = (apiKey ? requestRunCancel(apiKey, run) : Promise.resolve(false)).then(
-        (cancelled) => {
+      const cancellationConversationId = sendingConversationRef.current;
+      cancellationPromiseRef.current = (apiKey ? requestRunCancel(apiKey, run) : Promise.resolve("running")).then(
+        (status) => {
           if (cancellingRunRef.current === run) cancellingRunRef.current = null;
           if (activeRunRef.current !== run) return;
-          if (cancelled) {
+          if (status === "cancelled") {
             cancelledRunIdRef.current = run.runId;
-            setComposerNote("Agent run stopped.");
+            if (activeConversationIdRef.current === cancellationConversationId) setComposerNote("Agent run stopped.");
             stopRequest();
-          } else {
-            setComposerNote(
+          } else if (activeConversationIdRef.current === cancellationConversationId) {
+            setComposerNote(status === "finished" || status === "error"
+              ? "The run already ended. Receiving its final result."
+              : (
               "Could not confirm the run was cancelled. It may still be running and using your Cursor account. Still connected; press Stop to retry."
-            );
+            ));
           }
         }
       );
     },
-    [apiKey, stopRequest]
+    [apiKey, stopRequest, activeConversationIdRef]
   );
 
   const stopGenerating = useCallback(() => {
     if (!isSendingRef.current) return;
+    if (activeConversationIdRef.current !== sendingConversationRef.current) return;
 
     const activeRun = activeRunRef.current;
     if (activeRun) {
@@ -219,12 +230,12 @@ export function useChatSend({
     setComposerNote("Stopping... waiting for the agent to start so it can be cancelled.");
     stopWaitTimerRef.current = window.setTimeout(() => {
       stopWaitTimerRef.current = null;
-      if (!stopRequestedRef.current) return;
+      if (!stopRequestedRef.current || activeConversationIdRef.current !== sendingConversationRef.current) return;
       setComposerNote(
         "Cancellation is still pending while the agent starts. Staying connected so it can be cancelled when its run ID arrives."
       );
     }, STOP_WAIT_FOR_RUN_MS);
-  }, [cancelRunAndAbort]);
+  }, [cancelRunAndAbort, activeConversationIdRef]);
 
   const sendMessage = useCallback(
     async (
@@ -232,7 +243,7 @@ export function useChatSend({
       retry = false,
       baseMessages = messages,
       retryAttachments?: Pick<Message, "imageAttachments" | "pdfAttachments">,
-      recovery?: Pick<Message, "runId" | "turnId">
+      recovery?: Recovery
     ) => {
       const trimmed = content.trim();
       const imagesForMessage = retry
@@ -271,7 +282,7 @@ export function useChatSend({
       const conversationId = activeConversation.id;
       const conversationRepoUrl = activeConversation.repoUrl;
       const conversationBranch = activeConversation.branch || DEFAULT_BRANCH;
-      const conversationAgentId = activeConversation.agentId;
+      const conversationAgentId = recovery?.launchRetry ? recovery.launchAgentId : activeConversation.agentId;
       const conversationAgentSessionToken =
         activeConversation.agentSessionToken;
       const conversationAgentMode = activeAgentMode;
@@ -307,6 +318,8 @@ export function useChatSend({
       stopRequestedRef.current = false;
       cancelledRunIdRef.current = null;
       setIsSending(true);
+      sendingConversationRef.current = conversationId;
+      setSendingConversationId(conversationId);
       setExternalSyncPaused(true);
 
       const turnId = retry
@@ -351,6 +364,7 @@ export function useChatSend({
       let assistantActivity = "Starting Cursor cloud agent...";
       let assistantSources: string[] = [];
       let assistantPrUrl: string | undefined;
+      let assistantImplementation: ImplementationOutcome | undefined;
       let assistantRunId: string | undefined;
       let assistantRequestId: string | undefined;
       let assistantDurationMs: number | undefined;
@@ -369,7 +383,8 @@ export function useChatSend({
         heartbeatAt: Date.now(),
         activity: assistantActivity,
         activityLog: [assistantActivity],
-        turnId
+        turnId,
+        launchAgentId: conversationAgentId
       };
 
       replaceMessagesForConversation(conversationId, [
@@ -502,6 +517,10 @@ export function useChatSend({
             assistantSources = uniqueSortedSources([...assistantSources, path]);
             mergeSourceForConversation(conversationId, assistantId, path);
           },
+          onImplementation: (outcome) => {
+            assistantImplementation = outcome;
+            patchMessageForConversation(conversationId, assistantId, { implementation: outcome });
+          },
           onDone: (payload) => {
             activeRunRef.current = null;
             resolvedAgentId = payload.agentId;
@@ -534,6 +553,9 @@ export function useChatSend({
         const finalActivityLog = finalSnapshot.activityLog;
         const finalTrace = finalSnapshot.trace;
 
+        if (!assistantContent.trim() && assistantImplementation) {
+          assistantContent = "Cursor run finished. Check the implementation status below for branches and pull requests.";
+        }
         if (!assistantContent.trim()) {
           throw new Error("Cursor returned no assistant content.");
         }
@@ -549,12 +571,14 @@ export function useChatSend({
           trace: finalTrace.length ? finalTrace : undefined,
           sources: assistantSources,
           prUrl: assistantPrUrl,
+          implementation: assistantImplementation,
           runId: assistantRunId,
           requestId: assistantRequestId,
           durationMs: assistantDurationMs,
           usage: assistantUsage,
           modelId: assistantModelId,
-          turnId
+          turnId,
+          launchAgentId: conversationAgentId
         };
         const finalMessages = [...optimisticMessages, assistantMessage];
         replaceMessagesForConversation(
@@ -566,7 +590,7 @@ export function useChatSend({
         if (activeConversationIdRef.current === conversationId) {
           setComposerNote(
             assistantPrUrl
-              ? "Changes submitted. Pull request link is in the answer."
+              ? "Cursor reported a pull request. Check its current GitHub status in the answer."
               : isImplementMode(conversationAgentMode)
                 ? "Task completed by Cursor cloud agent."
                 : isPlanMode(conversationAgentMode)
@@ -612,11 +636,15 @@ export function useChatSend({
           activityLog: partial.activityLog.length ? partial.activityLog : undefined,
           trace: partial.trace.length ? partial.trace : undefined,
           sources: assistantSources.length ? assistantSources : undefined,
+          implementation: assistantImplementation && wasCancelled
+            ? { ...assistantImplementation, status: "cancelled" }
+            : assistantImplementation,
+          launchAgentId: conversationAgentId,
           runId: failedRunId,
           // Only a lost connection leaves a run worth re-attaching to; a failed
           // or cancelled run would just replay the same failure.
           recoverable:
-            !wasCancelled && Boolean(failedRunId) &&
+            !wasCancelled && Boolean(turnId) &&
             (wasAborted || isRecoverableStreamFailure(caught)),
           requestId:
             caught instanceof ChatStreamError ? caught.requestId : undefined,
@@ -644,6 +672,8 @@ export function useChatSend({
         isSendingRef.current = false;
         setExternalSyncPaused(false);
         setIsSending(false);
+        sendingConversationRef.current = undefined;
+        setSendingConversationId(undefined);
         // Refocusing on a phone would pop the keyboard over the answer.
         if (!isCoarsePointer()) inputRef.current?.focus();
       }
@@ -773,9 +803,12 @@ export function useChatSend({
 
   return {
     isSending,
+    canStop: isSending && sendingConversationId === activeConversation?.id,
     error,
     setError,
-    composerNote,
+    composerNote: isSending && sendingConversationId !== activeConversation?.id
+      ? "A run is active in another chat. Return to that chat to view it or stop it."
+      : composerNote,
     setComposerNote,
     copiedMessageId,
     shareStatus,

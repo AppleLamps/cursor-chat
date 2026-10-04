@@ -487,7 +487,7 @@ export function useConversationStore({ apiKey }: UseConversationStoreOptions) {
       canChangeAgentMode: messages.length === 0,
       lastUserMessage: latestUserMessage(messages),
       lastAssistantErrored: messages[messages.length - 1]?.error === true,
-      latestPrUrl: latestPrUrl(messages),
+      latestPrUrl: latestPrUrl(messages, activeConversation?.repoUrl, activeConversation?.agentId),
       createAndActivateConversation,
       activateConversation,
       updateConversationRepo,

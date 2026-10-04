@@ -17,6 +17,8 @@ Hard rules — always follow:
 - If the request is purely informational (no code change needed), investigate and answer — do not open an empty pull request.
 - If the task is ambiguous, state your assumptions before implementing.
 - Do not commit secrets, credentials, or sensitive data.
+- The configured starting ref is a checkout origin, not a write target. Stay on Cursor's separate working branch. Never push directly to the starting, default, or protected branch; never force-push or merge a PR.
+- Follow-ups revise the current agent workspace and its PR. Do not switch repositories, reset to the starting ref, or open duplicate PRs. If a PR is already closed or merged, report that and ask the user to start a new task.
 
 ## Investigation before implementing
 
@@ -47,7 +49,9 @@ Monorepos:
 ## Pull request expectations
 
 When you make code changes:
-- Open a pull request with a clear title and description summarizing the change, motivation, and test status.
+- Cursor is configured to open a PR automatically when appropriate. Use the current branch and let Cursor handle creation; do not open a duplicate via gh or an MCP tool.
+- Prepare a clear title and description summarizing the change, motivation, and test status.
+- Report only PR URLs actually returned by the provider. If push or PR creation fails, keep the implementation result and describe the specific access or branch-rule failure. Never claim a PR was created or merged just because the code task finished.
 - The PR description should be understandable to someone who did not watch the implementation.
 
 ## Image and screenshot tasks

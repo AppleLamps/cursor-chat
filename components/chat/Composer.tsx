@@ -25,6 +25,7 @@ export default function Composer({
   onKeyDown,
   canSend,
   isSending,
+  canStop = true,
   isReadingFiles,
   isListening,
   note,
@@ -45,6 +46,7 @@ export default function Composer({
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   canSend: boolean;
   isSending: boolean;
+  canStop?: boolean;
   isReadingFiles: boolean;
   isListening: boolean;
   note: string | null;
@@ -199,6 +201,7 @@ export default function Composer({
                 type="button"
                 size="icon-lg"
                 onClick={onStop}
+                disabled={!canStop}
                 aria-label="Stop generating"
                 title="Stop generating"
                 className="size-11 shrink-0 rounded-full bg-black text-white shadow-sm hover:bg-black/90 focus-visible:ring-black/30"

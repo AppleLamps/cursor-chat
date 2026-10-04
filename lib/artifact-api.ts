@@ -22,7 +22,7 @@ export type ArtifactRequest = {
   path?: string;
 };
 
-export function authorizeArtifactRequest(body: ArtifactRequest):
+export function authorizeArtifactRequest(body: ArtifactRequest, options: { observationOnly?: boolean } = {}):
   | {
       ok: true;
       apiKey: string;
@@ -75,7 +75,7 @@ export function authorizeArtifactRequest(body: ArtifactRequest):
     branch: branchValidation.value,
     isFollowUp: true
   });
-  if (!policy.allowed) {
+  if (!options.observationOnly && !policy.allowed) {
     return {
       ok: false,
       response: NextResponse.json({ error: policy.error }, { status: policy.status })
@@ -90,7 +90,7 @@ export function authorizeArtifactRequest(body: ArtifactRequest):
     agentMode,
     modelId: model.id,
     modelParams: model.params
-  });
+  }, { observationOnly: options.observationOnly });
   if (!session.valid) {
     return {
       ok: false,

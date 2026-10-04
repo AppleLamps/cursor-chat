@@ -43,7 +43,8 @@ Recommended controls for environments that enable these tools:
 - The OAuth flow requests the `repo` scope (needed to list branches of private
   repositories; GitHub offers no read-only OAuth scope for them). Set
   `ASKCURSOR_GITHUB_OAUTH_SCOPE=public_repo` to limit it to public repositories,
-  or have users paste a fine-grained token with read-only Contents access. The client secret stays on the server; the access token is
+  or have users paste a fine-grained token with read-only Contents access and
+  Pull requests read access for implementation status. The client secret stays on the server; the access token is
   returned to the browser in the URL fragment so it is not logged, and is then
   stored exactly like a pasted token. A one-time `state` cookie guards against
   CSRF. Users can revoke access at https://github.com/settings/applications.
